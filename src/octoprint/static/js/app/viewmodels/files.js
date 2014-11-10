@@ -1,8 +1,9 @@
-function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
+function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel, slicingViewModel) {
     var self = this;
 
     self.printerState = printerStateViewModel;
     self.loginState = loginStateViewModel;
+    self.slicing = slicingViewModel;
 
     self.isErrorOrClosed = ko.observable(undefined);
     self.isOperational = ko.observable(undefined);
@@ -12,6 +13,11 @@ function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
     self.isReady = ko.observable(undefined);
     self.isLoading = ko.observable(undefined);
     self.isSdReady = ko.observable(undefined);
+
+    self.searchQuery = ko.observable(undefined);
+    self.searchQuery.subscribe(function() {
+        self.performSearch();
+    });
 
     self.freeSpace = ko.observable(undefined);
     self.freeSpaceString = ko.computed(function() {
@@ -52,12 +58,18 @@ function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
             },
             "local": function(file) {
                 return !(file["origin"] && file["origin"] == "sdcard");
+            },
+            "machinecode": function(file) {
+                return file["type"] && file["type"] == "machinecode";
+            },
+            "model": function(file) {
+                return file["type"] && file["type"] == "model";
             }
         },
         "name",
-        [],
-        [["sd", "local"]],
-        CONFIG_GCODEFILESPERPAGE
+        ["machinecode"],
+        [["sd", "local"], ["machinecode", "model"]],
+        0
     );
 
     self.isLoadActionPossible = ko.computed(function() {
@@ -101,13 +113,21 @@ function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
         self.isSdReady(data.flags.sdReady);
     };
 
+    self._otherRequestInProgress = false;
     self.requestData = function(filenameToFocus, locationToFocus) {
+        if (self._otherRequestInProgress) return;
+
+        self._otherRequestInProgress = true;
         $.ajax({
             url: API_BASEURL + "files",
             method: "GET",
             dataType: "json",
             success: function(response) {
                 self.fromResponse(response, filenameToFocus, locationToFocus);
+                self._otherRequestInProgress = false;
+            },
+            error: function() {
+                self._otherRequestInProgress = false;
             }
         });
     };
@@ -125,7 +145,11 @@ function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
             if (locationToFocus === undefined) {
                 locationToFocus = "local";
             }
-            self.listHelper.switchToItem(function(item) {return item.name == filenameToFocus && item.origin == locationToFocus});
+            var entryElement = self.getEntryElement({name: filenameToFocus, origin: locationToFocus});
+            if (entryElement) {
+                var entryOffset = entryElement.offsetTop;
+                $(".gcode_files").slimScroll({ scrollTo: entryOffset + "px" });
+            }
         }
 
         if (response.free) {
@@ -135,8 +159,7 @@ function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
         self.highlightFilename(self.printerState.filename());
     };
 
-    self.loadFile = function(filename, printAfterLoad) {
-        var file = self.listHelper.getItem(function(item) {return item.name == filename});
+    self.loadFile = function(file, printAfterLoad) {
         if (!file || !file.refs || !file.refs.hasOwnProperty("resource")) return;
 
         $.ajax({
@@ -148,16 +171,8 @@ function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
         });
     };
 
-    self.removeFile = function(filename) {
-        var file = self.listHelper.getItem(function(item) {return item.name == filename});
+    self.removeFile = function(file) {
         if (!file || !file.refs || !file.refs.hasOwnProperty("resource")) return;
-
-        var origin;
-        if (file.origin === undefined) {
-            origin = "local";
-        } else {
-            origin = file.origin;
-        }
 
         $.ajax({
             url: file.refs.resource,
@@ -166,6 +181,18 @@ function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
                 self.requestData();
             }
         });
+    };
+
+    self.sliceFile = function(file) {
+        if (!file) return;
+
+        self.slicing.show(file.origin, file.name);
+    };
+
+    self.convertSVG = function(file) {
+        if (!file) return;
+
+        self.slicing.show(file.origin, file.name);
     };
 
     self.initSdCard = function() {
@@ -190,31 +217,20 @@ function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
         });
     };
 
-    self.getPopoverContent = function(data) {
-        var output = "<p><strong>Uploaded:</strong> " + formatDate(data["date"]) + "</p>";
-        if (data["gcodeAnalysis"]) {
-            output += "<p>";
-            if (data["gcodeAnalysis"]["filament"] && typeof(data["gcodeAnalysis"]["filament"]) == "object") {
-                var filament = data["gcodeAnalysis"]["filament"];
-                if (_.keys(filament).length == 1) {
-                    output += "<strong>Filament:</strong> " + formatFilament(data["gcodeAnalysis"]["filament"]["tool" + 0]) + "<br>";
-                } else {
-                    var i = 0;
-                    do {
-                        output += "<strong>Filament (Tool " + i + "):</strong> " + formatFilament(data["gcodeAnalysis"]["filament"]["tool" + i]) + "<br>";
-                        i++;
-                    } while (filament.hasOwnProperty("tool" + i));
-                }
-            }
-            output += "<strong>Estimated Print Time:</strong> " + formatDuration(data["gcodeAnalysis"]["estimatedPrintTime"]);
-            output += "</p>";
+    self.downloadLink = function(data) {
+        if (data["refs"] && data["refs"]["download"]) {
+            return data["refs"]["download"];
+        } else {
+            return false;
         }
-        if (data["prints"] && data["prints"]["last"]) {
-            output += "<p>";
-            output += "<strong>Last Print:</strong> <span class=\"" + (data["prints"]["last"]["success"] ? "text-success" : "text-error") + "\">" + formatDate(data["prints"]["last"]["date"]) + "</span>";
-            output += "</p>";
+    };
+
+    self.lastTimePrinted = function(data) {
+        if (data["prints"] && data["prints"]["last"] && data["prints"]["last"]["date"]) {
+            return data["prints"]["last"]["date"];
+        } else {
+            return "-";
         }
-        return output;
     };
 
     self.getSuccessClass = function(data) {
@@ -224,8 +240,31 @@ function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
         return data["prints"]["last"]["success"] ? "text-success" : "text-error";
     };
 
+    self.templateFor = function(data) {
+        var extension = data.name.split('.').pop().toLowerCase();
+        if (extension == "svg") {
+            return "files_template_" + data.type + "_svg";
+        } else {
+            return "files_template_" + data.type;
+        }
+    };
+
+    self.getEntryId = function(data) {
+        return "gcode_file_" + md5(data["origin"] + ":" + data["name"]);
+    };
+
+    self.getEntryElement = function(data) {
+        var entryId = self.getEntryId(data);
+        var entryElements = $("#" + entryId);
+        if (entryElements && entryElements[0]) {
+            return entryElements[0];
+        } else {
+            return undefined;
+        }
+    };
+
     self.enableRemove = function(data) {
-        return self.loginState.isUser() && !(self.listHelper.isSelected(data) && (self.isPrinting() || self.isPaused()));
+        return self.loginState.isUser() && !_.contains(self.printerState.busyFiles(), data.origin + ":" + data.name);
     };
 
     self.enableSelect = function(data, printAfterSelect) {
@@ -233,5 +272,85 @@ function GcodeFilesViewModel(printerStateViewModel, loginStateViewModel) {
         return isLoadActionPossible && !self.listHelper.isSelected(data);
     };
 
+    self.enableSlicing = function(data) {
+        return self.loginState.isUser() && !(self.isPrinting() || self.isPaused());
+    };
+
+    self.enableSVGConversion = function(data) {
+        return self.loginState.isUser() && !(self.isPrinting() || self.isPaused());
+    };
+
+    self.enableAdditionalData = function(data) {
+        return data["gcodeAnalysis"] || data["prints"] && data["prints"]["last"];
+    };
+
+    self.toggleAdditionalData = function(data) {
+        var entryElement = self.getEntryElement(data);
+        if (!entryElement) return;
+
+        var additionalInfo = $(".additionalInfo", entryElement);
+        additionalInfo.slideToggle("fast", function() {
+            $(".toggleAdditionalData i", entryElement).toggleClass("icon-chevron-down icon-chevron-up");
+        });
+    };
+
+    self.getAdditionalData = function(data) {
+        var output = "";
+        if (data["gcodeAnalysis"]) {
+            if (data["gcodeAnalysis"]["filament"] && typeof(data["gcodeAnalysis"]["filament"]) == "object") {
+                var filament = data["gcodeAnalysis"]["filament"];
+                if (_.keys(filament).length == 1) {
+                    output += gettext("Filament") + ": " + formatFilament(data["gcodeAnalysis"]["filament"]["tool" + 0]) + "<br>";
+                } else if (_.keys(filament).length > 1) {
+                    for (var toolKey in filament) {
+                        if (!_.startsWith(toolKey, "tool") || !filament[toolKey] || !filament[toolKey].hasOwnProperty("length") || filament[toolKey]["length"] <= 0) continue;
+
+                        output += gettext("Filament") + " (" + gettext("Tool") + " " + toolKey.substr("tool".length) + "): " + formatFilament(filament[toolKey]) + "<br>";
+                    }
+                }
+            }
+            output += gettext("Estimated Print Time") + ": " + formatDuration(data["gcodeAnalysis"]["estimatedPrintTime"]) + "<br>";
+        }
+        if (data["prints"] && data["prints"]["last"]) {
+            output += gettext("Last Printed") + ": " + formatTimeAgo(data["prints"]["last"]["date"]) + "<br>";
+            if (data["prints"]["last"]["lastPrintTime"]) {
+                output += gettext("Last Print Time") + ": " + formatDuration(data["prints"]["last"]["lastPrintTime"]);
+            }
+        }
+        return output;
+    };
+
+    self.performSearch = function() {
+        var query = self.searchQuery();
+        if (query !== undefined && query.trim() != "") {
+            self.listHelper.changeSearchFunction(function(entry) {
+                return entry && entry["name"].toLocaleLowerCase().indexOf(query) > -1;
+            });
+        } else {
+            self.listHelper.resetSearch();
+        }
+    };
+
+    self.onDataUpdaterReconnect = function() {
+        self.requestData();
+    };
+
+    self.onStartup = function() {
+        self.requestData();
+    };
+
+    self.onUpdatedFiles = function(payload) {
+        if (payload.type == "gcode") {
+            self.requestData();
+        }
+    };
+
+    self.onSlicingDone = function(payload) {
+        self.requestData();
+    };
+
+    self.onMetadataAnalysisFinished = function(payload) {
+        self.requestData();
+    };
 }
 

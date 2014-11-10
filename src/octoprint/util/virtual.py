@@ -155,8 +155,20 @@ class VirtualPrinter():
 
 	def _listSd(self):
 		self.readList.append("Begin file list")
-		for osFile in os.listdir(self._virtualSd):
-			self.readList.append(osFile.upper())
+		if settings().getBoolean(["devel", "virtualPrinter", "extendedSdFileList"]):
+			self.readList.extend(
+				map(
+					lambda x: "%s %d" % (x.upper(), os.stat(os.path.join(self._virtualSd, x)).st_size),
+					os.listdir(self._virtualSd)
+				)
+			)
+		else:
+			self.readList.extend(
+				map(
+					lambda x: x.upper(),
+					os.listdir(self._virtualSd)
+				)
+			)
 		self.readList.append("End file list")
 		self._sendOk()
 
@@ -200,6 +212,9 @@ class VirtualPrinter():
 			for i in range(len(self.temp)):
 				allTemps.append((i, self.temp[i], self.targetTemp[i]))
 			allTempsString = " ".join(map(lambda x: "T%d:%.2f /%.2f" % x if includeTarget else "T%d:%.2f" % (x[0], x[1]), allTemps))
+
+			if settings().getBoolean(["devel", "virtualPrinter", "smoothieTemperatureReporting"]):
+				allTempsString = allTempsString.replace("T0:", "T:")
 
 			if settings().getBoolean(["devel", "virtualPrinter", "hasBed"]):
 				if includeTarget:

@@ -18,14 +18,13 @@ Retrieve all files
 
    Returns a :ref:`Retrieve response <sec-api-fileops-datamodel-retrieveresponse>`.
 
-   **Example request**:
+   **Example**:
 
    .. sourcecode:: http
 
       GET /api/files HTTP/1.1
       Host: example.com
-
-   **Example response**:
+      X-Api-Key: abcdef...
 
    .. sourcecode:: http
 
@@ -84,14 +83,13 @@ Retrieve files from specific location
 
    Returns a :ref:`Retrieve response <sec-api-fileops-datamodel-retrieveresponse>`.
 
-   **Example request**:
+   **Example**:
 
    .. sourcecode:: http
 
       GET /api/files/local HTTP/1.1
       Host: example.com
-
-   **Example response**:
+      X-Api-Key: abcdef...
 
    .. sourcecode:: http
 
@@ -150,7 +148,7 @@ Upload file
    Returns a :http:statuscode:`201` response with a ``Location`` header set to the management URL of the uploaded
    file and an :ref:`Upload Response <sec-api-fileops-datamodel-uploadresponse>` as the body upon successful completion.
 
-   **Example request**
+   **Example**
 
    .. sourcecode:: http
 
@@ -186,13 +184,11 @@ Upload file
       true
       ------WebKitFormBoundaryDeC2E3iWbTv1PwMC--
 
-   **Example response**
-
    .. sourcecode:: http
 
       HTTP/1.1 200 OK
       Content-Type: application/json
-      Location:
+      Location: http://example.com/api/files/sdcard/whistle_.gcode
 
       {
         "files": {
@@ -244,21 +240,20 @@ Retrieve a specific file's information
 
    If the file is unknown, a :http:statuscode:`404` is returned.
 
-   On success, a :http:statuscode:`200` is returned, with a :ref:`file information item <sec-api-fileops-datamodel-fileinfo>`
+   On success, a :http:statuscode:`200` is returned, with a :ref:`file information item <sec-api-datamodel-files-file>`
    as the response body.
 
-   **Example Request**
+   **Example**
 
    .. sourcecode:: http
 
       GET /api/files/local/whistle_v2.gcode HTTP/1.1
       Host: example.com
-
-   **Example Response**
+      X-Api-Key: abcdef...
 
    .. sourcecode:: http
 
-      HTTP/1.1 200 Ok
+      HTTP/1.1 200 OK
       Content-Type: application/json
 
       {
@@ -309,7 +304,22 @@ Issue a file command
        is not operational when this parameter is present and set to ``true``, the request will fail with a response
        of ``409 Conflict``.
 
-   Upon success, a status code of :http:statuscode:`204` and an empty body is returned.
+   slice
+     Slices an STL file into GCODE. Note that this is an asynchronous operation that will take place in the background
+     after the response has been sent back to the client. Additional parameters are:
+
+     * ``slicer``: The slicing engine to use, defaults to ``cura`` if not set, which is also the only supported slicer right now.
+     * ``gcode``: Name of the GCODE file to generated, in the same location as the STL file. Defaults to the STL file name
+       with extension ``.gco`` if not set.
+     * ``profile``: Name of the slicing profile to use, if not set the default slicing profile of the slicer will be used.
+     * ``profile.*``: Override parameters, the ``profile.`` prefix will be stripped and the matching profile key will
+       be overridden with the supplied value. Use this if you want to specify things that change often like a different
+       temperature, filament diameter or infill percentage. Profile keys are slicer specific.
+
+     If consecutive slicing calls are made targeting the same GCODE filename (that also holds true if the default is used),
+     the slicing job already running in the background will be cancelled before the new one is started.
+
+   Upon success, a status code of :http:statuscode:`204` and an empty body is returned, unless specified otherwise.
 
    **Example Select Request**
 
@@ -325,6 +335,43 @@ Issue a file command
         "print": true
       }
 
+   .. sourcecode:: http
+
+      HTTP/1.1 204 No Content
+
+   **Example Slice Request**
+
+   .. sourcecode:: http
+
+      POST /api/files/local/some_model.stl HTTP/1.1
+      Host: example.com
+      Content-Type: application/json
+      X-Api-Key: abcdef...
+
+      {
+        "command": "slice",
+        "slicer": "cura",
+        "gcode": "some_model.first_try.gcode",
+        "profile": "high_quality",
+        "profile.infill": 75,
+        "profile.fill_density": 15
+      }
+
+   .. sourcecode:: http
+
+      HTTP/1.1 202 Accepted
+      Content-Type: application/json
+
+      {
+        "origin": "local",
+        "name": "some_model.first_try.gcode",
+        "refs": {
+          "download": "http://example.com/downloads/files/local/some_model.first_try.gcode",
+          "resource": "http://example.com/api/files/local/some_model.first_try.gcode"
+        }
+      }
+
+
    :param target:        The target location on which to delete the file, either ``local`` (for OctoPrint's ``uploads``
                          folder) or ``sdcard`` for the printer's SD card (if available)
    :param filename:      The filename of the file for which to issue the command
@@ -332,7 +379,9 @@ Issue a file command
    :json boolean print:  ``select`` command: Optional, whether to start printing the file directly after selection,
                          defaults to ``false``.
    :statuscode 200:      No error
+   :statuscode 202:      No error for a ``slice`` command.
    :statuscode 400:      If the `command` is unknown or the request is otherwise invalid
+   :statuscode 415:      If a ``slice`` command was issued against something other than an STL file.
    :statuscode 404:      If `target` is neither ``local`` nor ``sdcard`` or the requested file was not found
    :statuscode 409:      If a selected file is supposed to start printing directly but the printer is not operational.
 
@@ -384,7 +433,7 @@ Retrieve response
      - Description
    * - ``files``
      - 0..*
-     - Array of :ref:`File information items <sec-api-fileops-datamodel-fileinfo>`
+     - Array of :ref:`File information items <sec-api-datamodel-files-file>`
      - The list of requested files. Might be an empty list if no files are available
    * - ``free``
      - 0..1
@@ -412,12 +461,12 @@ Upload response
        contain the ``local`` property. If uploaded to SD card, this will contain both ``local`` and ``sdcard`` properties.
    * - ``files.local``
      - 1
-     - :ref:`sec-api-fileops-datamodel-fileinfo`
+     - :ref:`sec-api-datamodel-files-file`
      - The information regarding the file that was just uploaded to the local storage (only the fields ``name``,
        ``origin`` and ``refs`` will be set).
    * - ``files.sdcard``
      - 0..1
-     - :ref:`sec-api-fileops-datamodel-fileinfo`
+     - :ref:`sec-api-datamodel-files-file`
      - The information regarding the file that was just uploaded to the printer's SD card (only the fields ``name``,
        ``origin`` and ``refs`` will be set).
    * - ``done``
@@ -427,136 +476,3 @@ Upload response
        to perform a slicing step (``false``). Clients may use this information to direct progress displays related to
        the upload.
 
-.. _sec-api-fileops-datamodel-fileinfo:
-
-File information
-----------------
-
-.. list-table::
-   :widths: 15 5 10 30
-   :header-rows: 1
-
-   * - Name
-     - Multiplicity
-     - Type
-     - Description
-   * - ``name``
-     - 1
-     - String
-     - The name of the file
-   * - ``size``
-     - 0..1
-     - Number
-     - The size of the file in bytes. Only available for ``local`` files.
-   * - ``date``
-     - 0..1
-     - Unix timestamp
-     - The timestamp when this file was uploaded. Only available for ``local`` files.
-   * - ``origin``
-     - 1
-     - String, either ``local`` or ``sdcard``
-     - The origin of the file, ``local`` when stored in OctoPrint's ``uploads`` folder, ``sdcard`` when stored on the
-       printer's SD card (if available)
-   * - ``refs``
-     - 0..1
-     - :ref:`sec-api-fileops-datamodel-ref`
-     - References relevant to this file
-   * - ``gcodeAnalysis``
-     - 0..1
-     - :ref:`GCODE analysis information <sec-api-fileops-datamodel-gcodeanalysis>`
-     - Information from the analysis of the GCODE file, if available.
-   * - ``prints``
-     - 0..1
-     - :ref:`Print information <sec-api-fileops-datamodel-prints>`
-     - Information regarding prints of this file, if available.
-
-.. _sec-api-fileops-datamodel-gcodeanalysis:
-
-GCODE analysis information
---------------------------
-
-.. list-table::
-   :widths: 15 5 10 30
-   :header-rows: 1
-
-   * - Name
-     - Multiplicity
-     - Type
-     - Description
-   * - ``estimatedPrintTime``
-     - 0..1
-     - Integer
-     - The estimated print time of the file, in seconds
-   * - ``filament``
-     - 0..1
-     - Object
-     - The estimated usage of filament
-   * - ``filament.length``
-     - 0..1
-     - Integer
-     - The length of filament used, in mm
-   * - ``filament.volume``
-     - 0..1
-     - Float
-     - The volume of filament used, in cm³
-
-
-.. _sec-api-fileops-datamodel-prints:
-
-Print information
------------------
-
-.. list-table::
-   :widths: 15 5 10 30
-   :header-rows: 1
-
-   * - Name
-     - Multiplicity
-     - Type
-     - Description
-   * - ``failure``
-     - 1
-     - Number
-     - The number of failed prints on record for the file
-   * - ``success``
-     - 1
-     - Number
-     - The number of successful prints on record for the file
-   * - ``last``
-     - 0..1
-     - Object
-     - Information regarding the last print on record for the file
-   * - ``last.date``
-     - 1
-     - Unix timestamp
-     - Timestamp when this file was printed last
-   * - ``last.success``
-     - 1
-     - Boolean
-     - Whether the last print on record was a success (``true``) or not (``false``)
-
-.. _sec-api-fileops-datamodel-ref:
-
-References
-----------
-
-.. list-table::
-   :widths: 15 5 10 30
-   :header-rows: 1
-
-   * - Name
-     - Multiplicity
-     - Type
-     - Description
-   * - ``resource``
-     - 1
-     - URL
-     - The resource that represents the file (e.g. for issuing commands to or for deleting)
-   * - ``download``
-     - 0..1
-     - URL
-     - The download URL for the file
-   * - ``model``
-     - 0..1
-     - URL
-     - The model from which this file was generated (e.g. an STL, currently not used)

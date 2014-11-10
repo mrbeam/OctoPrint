@@ -22,15 +22,28 @@ function PrinterStateViewModel(loginStateViewModel) {
     self.sd = ko.observable(undefined);
     self.timelapse = ko.observable(undefined);
 
+    self.busyFiles = ko.observableArray([]);
+
     self.filament = ko.observableArray([]);
     self.estimatedPrintTime = ko.observable(undefined);
+    self.lastPrintTime = ko.observable(undefined);
 
     self.currentHeight = ko.observable(undefined);
 
+    self.TITLE_PRINT_BUTTON_PAUSED = gettext("Restarts the print job from the beginning");
+    self.TITLE_PRINT_BUTTON_UNPAUSED = gettext("Starts the print job");
+    self.TITLE_PAUSE_BUTTON_PAUSED = gettext("Resumes the print job");
+    self.TITLE_PAUSE_BUTTON_UNPAUSED = gettext("Pauses the print job");
+
+    self.titlePrintButton = ko.observable(self.TITLE_PRINT_BUTTON_UNPAUSED);
+    self.titlePauseButton = ko.observable(self.TITLE_PAUSE_BUTTON_UNPAUSED);
+
     self.estimatedPrintTimeString = ko.computed(function() {
-        if (!self.estimatedPrintTime())
-            return "-";
-        return formatDuration(self.estimatedPrintTime());
+        if (self.lastPrintTime())
+            return formatDuration(self.lastPrintTime());
+        if (self.estimatedPrintTime())
+            return formatDuration(self.estimatedPrintTime());
+        return "-";
     });
     self.byteString = ko.computed(function() {
         if (!self.filesize())
@@ -60,9 +73,9 @@ function PrinterStateViewModel(loginStateViewModel) {
     });
     self.pauseString = ko.computed(function() {
         if (self.isPaused())
-            return "Continue";
+            return gettext("Continue");
         else
-            return "Pause";
+            return gettext("Pause");
     });
 
     self.timelapseString = ko.computed(function() {
@@ -73,9 +86,9 @@ function PrinterStateViewModel(loginStateViewModel) {
 
         var type = timelapse["type"];
         if (type == "zchange") {
-            return "On Z Change";
+            return gettext("On Z Change");
         } else if (type == "timed") {
-            return "Timed (" + timelapse["options"]["interval"] + "s)";
+            return gettext("Timed") + " (" + timelapse["options"]["interval"] + " " + gettext("sec") + ")";
         } else {
             return "-";
         }
@@ -98,10 +111,13 @@ function PrinterStateViewModel(loginStateViewModel) {
         self._processJobData(data.job);
         self._processProgressData(data.progress);
         self._processZData(data.currentZ);
+        self._processBusyFiles(data.busyFiles);
     };
 
     self._processStateData = function(data) {
-        self.stateString(data.stateString);
+        var prevPaused = self.isPaused();
+
+        self.stateString(gettext(data.text));
         self.isErrorOrClosed(data.flags.closedOrError);
         self.isOperational(data.flags.operational);
         self.isPaused(data.flags.paused);
@@ -109,6 +125,16 @@ function PrinterStateViewModel(loginStateViewModel) {
         self.isError(data.flags.error);
         self.isReady(data.flags.ready);
         self.isSdReady(data.flags.sdReady);
+
+        if (self.isPaused() != prevPaused) {
+            if (self.isPaused()) {
+                self.titlePrintButton(self.TITLE_PRINT_BUTTON_PAUSED);
+                self.titlePauseButton(self.TITLE_PAUSE_BUTTON_PAUSED);
+            } else {
+                self.titlePrintButton(self.TITLE_PRINT_BUTTON_UNPAUSED);
+                self.titlePauseButton(self.TITLE_PAUSE_BUTTON_UNPAUSED);
+            }
+        }
     };
 
     self._processJobData = function(data) {
@@ -123,18 +149,18 @@ function PrinterStateViewModel(loginStateViewModel) {
         }
 
         self.estimatedPrintTime(data.estimatedPrintTime);
+        self.lastPrintTime(data.lastPrintTime);
 
         var result = [];
         if (data.filament && typeof(data.filament) == "object" && _.keys(data.filament).length > 0) {
-            var i = 0;
-            do {
-                var key = "tool" + i;
-                result[i] = {
-                    name: ko.observable("Tool " + i),
+            for (var key in data.filament) {
+                if (!_.startsWith(key, "tool") || !data.filament[key] || !data.filament[key].hasOwnProperty("length") || data.filament[key].length <= 0) continue;
+
+                result.push({
+                    name: ko.observable(gettext("Tool") + " " + key.substr("tool".length)),
                     data: ko.observable(data.filament[key])
-                };
-                i++;
-            } while (data.filament.hasOwnProperty("tool" + i));
+                });
+            }
         }
         self.filament(result);
     };
@@ -154,13 +180,23 @@ function PrinterStateViewModel(loginStateViewModel) {
         self.currentHeight(data);
     };
 
+    self._processBusyFiles = function(data) {
+        var busyFiles = [];
+        _.each(data, function(entry) {
+            if (entry.hasOwnProperty("name") && entry.hasOwnProperty("origin")) {
+                busyFiles.push(entry.origin + ":" + entry.name);
+            }
+        });
+        self.busyFiles(busyFiles);
+    };
+
     self.print = function() {
         var restartCommand = function() {
             self._jobCommand("restart");
         };
 
         if (self.isPaused()) {
-            $("#confirmation_dialog .confirmation_dialog_message").text("This will restart the print job from the beginning.");
+            $("#confirmation_dialog .confirmation_dialog_message").text(gettext("This will restart the print job from the beginning."));
             $("#confirmation_dialog .confirmation_dialog_acknowledge").unbind("click");
             $("#confirmation_dialog .confirmation_dialog_acknowledge").click(function(e) {e.preventDefault(); $("#confirmation_dialog").modal("hide"); restartCommand(); });
             $("#confirmation_dialog").modal("show");
@@ -178,13 +214,18 @@ function PrinterStateViewModel(loginStateViewModel) {
         self._jobCommand("cancel");
     };
 
-    self._jobCommand = function(command) {
+    self._jobCommand = function(command, callback) {
         $.ajax({
             url: API_BASEURL + "job",
             type: "POST",
             dataType: "json",
             contentType: "application/json; charset=UTF-8",
-            data: JSON.stringify({command: command})
+            data: JSON.stringify({command: command}),
+            success: function(response) {
+                if (callback != undefined) {
+                    callback();
+                }
+            }
         });
     }
 }

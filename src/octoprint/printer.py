@@ -30,11 +30,13 @@ def getConnectionOptions():
 	}
 
 class Printer():
-	def __init__(self, gcodeManager):
+	def __init__(self, fileManager, analysisQueue):
 		from collections import deque
 
-		self._gcodeManager = gcodeManager
-		self._gcodeManager.registerCallback(self)
+		self._logger = logging.getLogger(__name__)
+
+		self._analysisQueue = analysisQueue
+		self._fileManager = fileManager
 
 		# state
 		# TODO do we really need to hold the temperature here?
@@ -67,7 +69,6 @@ class Printer():
 		self._sdPrinting = False
 		self._sdStreaming = False
 		self._sdFilelistAvailable = threading.Event()
-		self._sdRemoteName = None
 		self._streamingFinishedCallback = None
 
 		self._selectedFile = None
@@ -87,7 +88,7 @@ class Printer():
 			addMessageCallback=self._sendAddMessageCallbacks
 		)
 		self._stateMonitor.reset(
-			state={"state": None, "stateString": self.getStateString(), "flags": self._getStateFlags()},
+			state={"text": self.getStateString(), "flags": self._getStateFlags()},
 			jobData={
 				"file": {
 					"name": None,
@@ -96,6 +97,7 @@ class Printer():
 					"date": None
 				},
 				"estimatedPrintTime": None,
+				"lastPrintTime": None,
 				"filament": {
 					"length": None,
 					"volume": None
@@ -120,40 +122,32 @@ class Printer():
 	def _sendAddTemperatureCallbacks(self, data):
 		for callback in self._callbacks:
 			try: callback.addTemperature(data)
-			except: pass
+			except: self._logger.exception("Exception while adding temperature data point")
 
 	def _sendAddLogCallbacks(self, data):
 		for callback in self._callbacks:
 			try: callback.addLog(data)
-			except: pass
+			except: self._logger.exception("Exception while adding communication log entry")
 
 	def _sendAddMessageCallbacks(self, data):
 		for callback in self._callbacks:
 			try: callback.addMessage(data)
-			except: pass
+			except: self._logger.exception("Exception while adding printer message")
 
 	def _sendCurrentDataCallbacks(self, data):
 		for callback in self._callbacks:
 			try: callback.sendCurrentData(copy.deepcopy(data))
-			except: pass
+			except: self._logger.exception("Exception while pushing current data")
 
 	def _sendTriggerUpdateCallbacks(self, type):
 		for callback in self._callbacks:
 			try: callback.sendEvent(type)
-			except: pass
+			except: self._logger.exception("Exception while pushing trigger update")
 
 	def _sendFeedbackCommandOutput(self, name, output):
 		for callback in self._callbacks:
 			try: callback.sendFeedbackCommandOutput(name, output)
-			except: pass
-
-	#~~ callback from gcodemanager
-
-	def sendUpdateTrigger(self, type):
-		if type == "gcodeFiles" and self._selectedFile:
-			self._setJobData(self._selectedFile["filename"],
-				self._selectedFile["filesize"],
-				self._selectedFile["sd"])
+			except: self._logger.exception("Exception while pushing feedback command output")
 
 	#~~ callback from metadata analysis event
 
@@ -256,7 +250,7 @@ class Printer():
 
 	def selectFile(self, filename, sd, printAfterSelect=False):
 		if self._comm is None or (self._comm.isBusy() or self._comm.isStreaming()):
-			logging.info("Cannot load file: printer not connected or currently busy")
+			self._logger.info("Cannot load file: printer not connected or currently busy")
 			return
 
 		self._printAfterSelect = printAfterSelect
@@ -316,7 +310,7 @@ class Printer():
 
 		# mark print as failure
 		if self._selectedFile is not None:
-			self._gcodeManager.printFailed(self._selectedFile["filename"])
+			self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._comm.getPrintTime(), False)
 			payload = {
 				"file": self._selectedFile["filename"],
 				"origin": FileDestinations.LOCAL
@@ -333,7 +327,7 @@ class Printer():
 
 	def _setState(self, state):
 		self._state = state
-		self._stateMonitor.setState({"state": self._state, "stateString": self.getStateString(), "flags": self._getStateFlags()})
+		self._stateMonitor.setState({"text": self.getStateString(), "flags": self._getStateFlags()})
 
 	def _addLog(self, log):
 		self._log.append(log)
@@ -401,6 +395,7 @@ class Printer():
 			return
 
 		estimatedPrintTime = None
+		lastPrintTime = None
 		date = None
 		filament = None
 		if filename:
@@ -409,21 +404,28 @@ class Printer():
 			if not sd:
 				date = int(os.stat(filename).st_ctime)
 
-			fileData = self._gcodeManager.getFileData(filename)
-			if fileData is not None and "gcodeAnalysis" in fileData.keys():
-				if "estimatedPrintTime" in fileData["gcodeAnalysis"].keys():
-					estimatedPrintTime = fileData["gcodeAnalysis"]["estimatedPrintTime"]
-				if "filament" in fileData["gcodeAnalysis"].keys():
-					filament = fileData["gcodeAnalysis"]["filament"]
+			try:
+				fileData = self._fileManager.get_metadata(FileDestinations.SDCARD if sd else FileDestinations.LOCAL, filename)
+			except:
+				fileData = None
+			if fileData is not None:
+				if "analysis" in fileData:
+					if estimatedPrintTime is None and "estimatedPrintTime" in fileData["analysis"]:
+						estimatedPrintTime = fileData["analysis"]["estimatedPrintTime"]
+					if "filament" in fileData["analysis"].keys():
+						filament = fileData["analysis"]["filament"]
+				if "prints" in fileData and fileData["prints"] and "last" in fileData["prints"] and fileData["prints"]["last"] and "lastPrintTime" in fileData["prints"]["last"]:
+					lastPrintTime = fileData["prints"]["last"]["lastPrintTime"]
 
 		self._stateMonitor.setJobData({
 			"file": {
-				"name": os.path.basename(filename),
+				"name": os.path.basename(filename) if filename is not None else None,
 				"origin": FileDestinations.SDCARD if sd else FileDestinations.LOCAL,
 				"size": filesize,
 				"date": date
 			},
 			"estimatedPrintTime": estimatedPrintTime,
+			"lastPrintTime": lastPrintTime,
 			"filament": filament,
 		})
 
@@ -431,9 +433,9 @@ class Printer():
 		try:
 			data = self._stateMonitor.getCurrentData()
 			data.update({
-				"tempHistory": list(self._temps),
-				"logHistory": list(self._log),
-				"messageHistory": list(self._messages)
+				"temps": list(self._temps),
+				"logs": list(self._log),
+				"messages": list(self._messages)
 			})
 			callback.sendHistoryData(data)
 		except Exception, err:
@@ -451,9 +453,6 @@ class Printer():
 			"ready": self.isReady(),
 			"sdReady": self.isSdReady()
 		}
-
-	def getCurrentData(self):
-		return self._stateMonitor.getCurrentData()
 
 	#~~ callbacks triggered from self._comm
 
@@ -476,12 +475,12 @@ class Printer():
 		if self._comm is not None and oldState == self._comm.STATE_PRINTING:
 			if self._selectedFile is not None:
 				if state == self._comm.STATE_OPERATIONAL:
-					self._gcodeManager.printSucceeded(self._selectedFile["filename"])
+					self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._comm.getPrintTime(), True)
 				elif state == self._comm.STATE_CLOSED or state == self._comm.STATE_ERROR or state == self._comm.STATE_CLOSED_WITH_ERROR:
-					self._gcodeManager.printFailed(self._selectedFile["filename"])
-			self._gcodeManager.resumeAnalysis() # printing done, put those cpu cycles to good use
+					self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL, self._selectedFile["filename"], time.time(), self._comm.getPrintTime(), False)
+			self._analysisQueue.resume() # printing done, put those cpu cycles to good use
 		elif self._comm is not None and state == self._comm.STATE_PRINTING:
-			self._gcodeManager.pauseAnalysis() # do not analyse gcode while printing
+			self._analysisQueue.pause() # do not analyse files while printing
 
 		self._setState(state)
 
@@ -513,7 +512,7 @@ class Printer():
 		self._setCurrentZ(newZ)
 
 	def mcSdStateChange(self, sdReady):
-		self._stateMonitor.setState({"state": self._state, "stateString": self.getStateString(), "flags": self._getStateFlags()})
+		self._stateMonitor.setState({"text": self.getStateString(), "flags": self._getStateFlags()})
 
 	def mcSdFiles(self, files):
 		eventManager().fire(Events.UPDATED_FILES, {"type": "gcode"})
@@ -521,33 +520,34 @@ class Printer():
 
 	def mcFileSelected(self, filename, filesize, sd):
 		self._setJobData(filename, filesize, sd)
-		self._stateMonitor.setState({"state": self._state, "stateString": self.getStateString(), "flags": self._getStateFlags()})
+		self._stateMonitor.setState({"text": self.getStateString(), "flags": self._getStateFlags()})
 
 		if self._printAfterSelect:
 			self.startPrint()
 
 	def mcPrintjobDone(self):
 		self._setProgressData(1.0, self._selectedFile["filesize"], self._comm.getPrintTime(), 0)
-		self._stateMonitor.setState({"state": self._state, "stateString": self.getStateString(), "flags": self._getStateFlags()})
+		self._stateMonitor.setState({"text": self.getStateString(), "flags": self._getStateFlags()})
 
 	def mcFileTransferStarted(self, filename, filesize):
 		self._sdStreaming = True
 
 		self._setJobData(filename, filesize, True)
 		self._setProgressData(0.0, 0, 0, None)
-		self._stateMonitor.setState({"state": self._state, "stateString": self.getStateString(), "flags": self._getStateFlags()})
+		self._stateMonitor.setState({"text": self.getStateString(), "flags": self._getStateFlags()})
 
 	def mcFileTransferDone(self, filename):
 		self._sdStreaming = False
 
 		if self._streamingFinishedCallback is not None:
-			self._streamingFinishedCallback(self._sdRemoteName, FileDestinations.SDCARD)
+			# in case of SD files, both filename and absolutePath are the same, so we set the (remote) filename for
+			# both parameters
+			self._streamingFinishedCallback(filename, filename, FileDestinations.SDCARD)
 
-		self._sdRemoteName = None
 		self._setCurrentZ(None)
 		self._setJobData(None, None, None)
 		self._setProgressData(None, None, None, None)
-		self._stateMonitor.setState({"state": self._state, "stateString": self.getStateString(), "flags": self._getStateFlags()})
+		self._stateMonitor.setState({"text": self.getStateString(), "flags": self._getStateFlags()})
 
 	def mcReceivedRegisteredMessage(self, command, output):
 		self._sendFeedbackCommandOutput(command, output)
@@ -561,13 +561,13 @@ class Printer():
 
 	def addSdFile(self, filename, absolutePath, streamingFinishedCallback):
 		if not self._comm or self._comm.isBusy() or not self._comm.isSdReady():
-			logging.error("No connection to printer or printer is busy")
+			self._logger.error("No connection to printer or printer is busy")
 			return
 
 		self._streamingFinishedCallback = streamingFinishedCallback
 
 		self.refreshSdFiles(blocking=True)
-		existingSdFiles = self._comm.getSdFiles()
+		existingSdFiles = map(lambda x: x[0], self._comm.getSdFiles())
 
 		remoteName = util.getDosFilename(filename, existingSdFiles)
 		self._comm.startFileTransfer(absolutePath, filename, remoteName)
@@ -628,12 +628,13 @@ class Printer():
 			bedTempOffset = None
 
 		result = {}
-		for tool in self._temp.keys():
-			result["tool%d" % tool] = {
-				"actual": self._temp[tool][0],
-				"target": self._temp[tool][1],
-				"offset": tempOffset[tool] if tool in tempOffset.keys() and tempOffset[tool] is not None else 0
-			}
+		if self._temp is not None:
+			for tool in self._temp.keys():
+				result["tool%d" % tool] = {
+					"actual": self._temp[tool][0],
+					"target": self._temp[tool][1],
+					"offset": tempOffset[tool] if tool in tempOffset.keys() and tempOffset[tool] is not None else 0
+					}
 		if self._bedTemp is not None:
 			result["bed"] = {
 				"actual": self._bedTemp[0],
@@ -676,9 +677,6 @@ class Printer():
 			return False
 		else:
 			return self._comm.isSdReady()
-
-	def isLoading(self):
-		return self._gcodeLoader is not None
 
 class StateMonitor(object):
 	def __init__(self, ratelimit, updateCallback, addTemperatureCallback, addLogCallback, addMessageCallback):

@@ -1,5 +1,59 @@
 # OctoPrint Changelog
 
+## 1.2.0 (Unreleased)
+
+### New Features
+
+* Added internationalization of UI. Translations of OctoPrint are being crowd sourced via [Transifex](https://www.transifex.com/projects/p/octoprint/).
+  The following translations are already available with more in the works:
+  - Dutch (nl)
+  - German (de)
+  - French (fr)
+  - Hebrew (he)
+  - Norwegian (no)
+  - Romanian (ro)
+* New file list: Pagination is gone, no more (mobile incompatible) pop overs, instead scrollable and with instant
+  search
+* You can now define a folder (default: `~/.octoprint/watched`) to be watched for newly added GCODE (or -- if slicing
+  support is enabled -- STL) files to automatically add.
+* OctoPrint now has a [plugin system](http://docs.octoprint.org/en/devel/plugins/index.html) which allows extending its 
+  core functionality.
+
+### Improvements
+
+* Logging is now configurable via config file
+* Added last print time to additional GCODE file information
+* Better error handling for capture issues during timelapse creation & more robust handling of missing images during
+  timelapse creation
+* Start counting the layers at 1 instead of 0 in the GCODE viewer
+* Upgraded [Font Awesome](https://fortawesome.github.io/Font-Awesome/) to version 3.2.1
+* Better error reporting for timelapse rendering and system commands
+* Custom control can now be defined so that they show a Confirm dialog with configurable text before executing 
+  ([#532](https://github.com/foosel/OctoPrint/issues/532) and [#590](https://github.com/foosel/OctoPrint/pull/590))
+* Slicing has been greatly improved:
+  * It now allows for a definition of slicing profiles to use for slicing plus overrides which can be defined per slicing 
+    job (defining overrides is not yet part of the UI but it's on the roadmap). 
+  * Slicers themselves are integrated into the system via ``SlicingPlugins``. 
+  * The [Cura integration](https://github.com/daid/Cura) has changed in such a way that OctoPrint now calls the 
+    [CuraEngine](https://github.com/Ultimaker/CuraEngine) directly instead of depending on the full Cura installation. See 
+    [the wiki](https://github.com/foosel/OctoPrint/wiki/Plugin:-Cura) for instructions on how to change your setup to 
+    accommodate the new integration.
+  * The "Slicing done" notification is now colored green ([#558](https://github.com/foosel/OctoPrint/issues/558)).
+* File management now supports STL files as first class citizens (including UI adjustments to allow management of
+  uploaded STL files including removal and reslicing) and also allows folders (not yet supported by UI)
+* Also interpret lines starting with "!!" as errors
+* Added deletion of pyc files to the `python setup.py clean` command
+
+### Bug Fixes
+
+* [#435](https://github.com/foosel/OctoPrint/issues/435) - Always interpret negative duration (e.g. for print time left)
+  as 0
+* [#633](https://github.com/foosel/OctoPrint/issues/633) - Correctly interpret temperature lines from multi extruder 
+  setups under Smoothieware
+* Various fixes of bugs in newly introduced features and improvements:
+  * [#625](https://github.com/foosel/OctoPrint/pull/625) - Newly added GCODE files were not being added to the analysis
+    queue
+
 ## 1.1.2 (Unreleased)
 
 ### Bug Fixes

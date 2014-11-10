@@ -13,6 +13,7 @@ import threading
 import Queue as queue
 import logging
 import serial
+import octoprint.plugin
 
 from collections import deque
 
@@ -21,8 +22,8 @@ from octoprint.util.avr_isp import ispBase
 
 from octoprint.settings import settings
 from octoprint.events import eventManager, Events
+from octoprint.filemanager import valid_file_type
 from octoprint.filemanager.destinations import FileDestinations
-from octoprint.gcodefiles import isGcodeFileName
 from octoprint.util import getExceptionString, getNewTimeout, sanitizeAscii, filterNonAscii
 from octoprint.util.virtual import VirtualPrinter
 
@@ -150,6 +151,13 @@ class MachineCom(object):
 		self._currentLine = 1
 		self._resendDelta = None
 		self._lastLines = deque([], 50)
+
+		# enabled grbl mode if requested
+		self._grbl = settings().getBoolean(["feature", "grbl"])
+
+		# hooks
+		self._pluginManager = octoprint.plugin.plugin_manager()
+		self._gcode_hooks = self._pluginManager.get_hooks("octoprint.comm.protocol.gcode")
 
 		# SD status data
 		self._sdAvailable = False
@@ -402,6 +410,7 @@ class MachineCom(object):
 			else:
 				self._sendNext()
 		except:
+			self._logger.exception("Error while trying to start printing")
 			self._errorValue = getExceptionString()
 			self._changeState(self.STATE_ERROR)
 			eventManager().fire(Events.ERROR, {"error": self.getErrorString()})
@@ -571,8 +580,8 @@ class MachineCom(object):
 		maxToolNum, parsedTemps = self._parseTemperatures(line)
 
 		# extruder temperatures
-		if not "T0" in parsedTemps.keys() and "T" in parsedTemps.keys():
-			# only single reporting, "T" is our one and only extruder temperature
+		if not "T0" in parsedTemps.keys() and not "T1" in parsedTemps.keys() and "T" in parsedTemps.keys():
+			# no T1 so only single reporting, "T" is our one and only extruder temperature
 			toolNum, actual, target = parsedTemps["T"]
 
 			if target is not None:
@@ -582,7 +591,13 @@ class MachineCom(object):
 				self._temp[0] = (actual, oldTarget)
 			else:
 				self._temp[0] = (actual, None)
-		elif "T0" in parsedTemps.keys():
+		elif not "T0" in parsedTemps.keys() and "T" in parsedTemps.keys():
+			# Smoothieware sends multi extruder temperature data this way: "T:<first extruder> T1:<second extruder> ..." and therefore needs some special treatment...
+			_, actual, target = parsedTemps["T"]
+			del parsedTemps["T"]
+			parsedTemps["T0"] = (0, actual, target)
+
+		if "T0" in parsedTemps.keys():
 			for n in range(maxToolNum + 1):
 				tool = "T%d" % n
 				if not tool in parsedTemps.keys():
@@ -646,13 +661,29 @@ class MachineCom(object):
 
 				##~~ SD file list
 				# if we are currently receiving an sd file list, each line is just a filename, so just read it and abort processing
-				if self._sdFileList and isGcodeFileName(line.strip().lower()) and not 'End file list' in line:
-					filename = line.strip().lower()
-					if filterNonAscii(filename):
-						self._logger.warn("Got a file from printer's SD that has a non-ascii filename (%s), that shouldn't happen according to the protocol" % filename)
+				if self._sdFileList and not "End file list" in line:
+					preprocessed_line = line.strip().lower()
+					fileinfo = preprocessed_line.rsplit(None, 1)
+					if len(fileinfo) > 1:
+						# we might have extended file information here, so let's split filename and size and try to make them a bit nicer
+						filename, size = fileinfo
+						try:
+							size = int(size)
+						except ValueError:
+							# whatever that was, it was not an integer, so we'll just use the whole line as filename and set size to None
+							filename = preprocessed_line
+							size = None
 					else:
-						self._sdFiles.append(filename)
-					continue
+						# no extended file information, so only the filename is there and we set size to None
+						filename = preprocessed_line
+						size = None
+
+					if valid_file_type(filename, "gcode"):
+						if filterNonAscii(filename):
+							self._logger.warn("Got a file from printer's SD that has a non-ascii filename (%s), that shouldn't happen according to the protocol" % filename)
+						else:
+							self._sdFiles.append((filename, size))
+						continue
 
 				##~~ Temperature processing
 				if ' T:' in line or line.startswith('T:') or ' T0:' in line or line.startswith('T0:'):
@@ -666,7 +697,7 @@ class MachineCom(object):
 							t = time.time()
 							self._heatupWaitTimeLost = t - self._heatupWaitStartTime
 							self._heatupWaitStartTime = t
-				elif supportRepetierTargetTemp:
+				elif supportRepetierTargetTemp and ('TargetExtr' in line or 'TargetBed' in line):
 					matchExtr = self._regex_repetierTempExtr.match(line)
 					matchBed = self._regex_repetierTempBed.match(line)
 
@@ -805,7 +836,11 @@ class MachineCom(object):
 							self._baudrateDetectRetry -= 1
 							self._serial.write('\n')
 							self._log("Baudrate test retry: %d" % (self._baudrateDetectRetry))
-							self._sendCommand("M105")
+							# self._sendCommand("M105")
+							if self._grbl:
+								self._sendCommand("$")
+							else:
+								self._sendCommand("M105")
 							self._testingBaudrate = True
 						else:
 							baudrate = self._baudrateDetectList.pop(0)
@@ -817,10 +852,17 @@ class MachineCom(object):
 								self._baudrateDetectTestOk = 0
 								timeout = getNewTimeout("communication")
 								self._serial.write('\n')
-								self._sendCommand("M105")
+								# self._sendCommand("M105")
+								if self._grbl:
+									self._sendCommand("$")
+								else:
+									self._sendCommand("M105")
 								self._testingBaudrate = True
 							except:
 								self._log("Unexpected error while setting baudrate: %d %s" % (baudrate, getExceptionString()))
+					elif self._grbl and '$$' in line:
+						self._log("Baudrate test ok: %d" % (self._baudrateDetectTestOk))
+						self._changeState(self.STATE_OPERATIONAL)
 					elif 'ok' in line and 'T:' in line:
 						self._baudrateDetectTestOk += 1
 						if self._baudrateDetectTestOk < 10:
@@ -840,19 +882,23 @@ class MachineCom(object):
 
 				### Connection attempt
 				elif self._state == self.STATE_CONNECTING:
-					if (line == "" or "wait" in line) and startSeen:
-						self._sendCommand("M105")
-					elif "start" in line:
-						startSeen = True
-					elif "ok" in line and startSeen:
-						self._changeState(self.STATE_OPERATIONAL)
-						if self._sdAvailable:
-							self.refreshSdFiles()
-						else:
-							self.initSdCard()
-						eventManager().fire(Events.CONNECTED, {"port": self._port, "baudrate": self._baudrate})
-					elif time.time() > timeout:
-						self.close()
+					if self._grbl:
+						if "Grbl" in line:
+								self._changeState(self.STATE_OPERATIONAL)
+					else:
+						if (line == "" or "wait" in line) and startSeen:
+							self._sendCommand("M105")
+						elif "start" in line:
+							startSeen = True
+						elif "ok" in line and startSeen:
+							self._changeState(self.STATE_OPERATIONAL)
+							if self._sdAvailable:
+								self.refreshSdFiles()
+							else:
+								self.initSdCard()
+							eventManager().fire(Events.CONNECTED, {"port": self._port, "baudrate": self._baudrate})
+						elif time.time() > timeout:
+							self.close()
 
 				### Operational
 				elif self._state == self.STATE_OPERATIONAL or self._state == self.STATE_PAUSED:
@@ -863,7 +909,8 @@ class MachineCom(object):
 						elif not self._commandQueue.empty():
 							self._sendCommand(self._commandQueue.get())
 						else:
-							self._sendCommand("M105")
+							if not self._grbl:
+								self._sendCommand("M105")
 						tempRequestTimeout = getNewTimeout("temperature")
 					# resend -> start resend procedure from requested line
 					elif line.lower().startswith("resend") or line.lower().startswith("rs"):
@@ -879,7 +926,8 @@ class MachineCom(object):
 
 					if self.isSdPrinting():
 						if time.time() > tempRequestTimeout and not heatingUp:
-							self._sendCommand("M105")
+							if not self._grbl:
+								self._sendCommand("M105")
 							tempRequestTimeout = getNewTimeout("temperature")
 
 						if time.time() > sdStatusRequestTimeout and not heatingUp:
@@ -888,7 +936,8 @@ class MachineCom(object):
 					else:
 						# Even when printing request the temperature every 5 seconds.
 						if time.time() > tempRequestTimeout and not self.isStreaming():
-							self._commandQueue.put("M105")
+							if not self._grbl:
+								self._commandQueue.put("M105")
 							tempRequestTimeout = getNewTimeout("temperature")
 
 						if "ok" in line and swallowOk:
@@ -897,7 +946,7 @@ class MachineCom(object):
 							if self._resendDelta is not None:
 								self._resendNextCommand()
 							elif not self._commandQueue.empty() and not self.isStreaming():
-								self._sendCommand(self._commandQueue.get())
+								self._sendCommand(self._commandQueue.get(), True)
 							else:
 								self._sendNext()
 						elif line.lower().startswith("resend") or line.lower().startswith("rs"):
@@ -945,7 +994,7 @@ class MachineCom(object):
 			try:
 				self._log("Connecting to: %s" % self._port)
 				if self._baudrate == 0:
-					self._serial = serial.Serial(str(self._port), 115200, timeout=0.1, writeTimeout=10000)
+					self._serial = serial.Serial(str(self._port), 115200, timeout=settings().getFloat(["serial", "timeout", "connection"]), writeTimeout=10000)
 				else:
 					self._serial = serial.Serial(str(self._port), self._baudrate, timeout=settings().getFloat(["serial", "timeout", "connection"]), writeTimeout=10000)
 			except:
@@ -958,7 +1007,7 @@ class MachineCom(object):
 
 	def _handleErrors(self, line):
 		# No matter the state, if we see an error, goto the error state and store the error for reference.
-		if line.startswith('Error:'):
+		if line.startswith('Error:') or line.startswith('!!'):
 			#Oh YEAH, consistency.
 			# Marlin reports an MIN/MAX temp error as "Error:x\n: Extruder switched off. MAXTEMP triggered !\n"
 			#	But a bed temp error is reported as "Error: Temperature heated bed switched off. MAXTEMP triggered !!"
@@ -1003,16 +1052,16 @@ class MachineCom(object):
 				if self.isStreaming():
 					self._sendCommand("M29")
 
-					filename = self._currentFile.getFilename()
+					remote = self._currentFile.getRemoteFilename()
 					payload = {
 						"local": self._currentFile.getLocalFilename(),
-						"remote": self._currentFile.getRemoteFilename(),
+						"remote": remote,
 						"time": self.getPrintTime()
 					}
 
 					self._currentFile = None
 					self._changeState(self.STATE_OPERATIONAL)
-					self._callback.mcFileTransferDone(filename)
+					self._callback.mcFileTransferDone(remote)
 					eventManager().fire(Events.TRANSFER_DONE, payload)
 					self.refreshSdFiles()
 				else:
@@ -1073,6 +1122,10 @@ class MachineCom(object):
 				return
 
 			if not self.isStreaming():
+				for hook in self._gcode_hooks:
+					hook_cmd = self._gcode_hooks[hook](self, cmd)
+					if hook_cmd and isinstance(hook_cmd, basestring):
+						cmd = hook_cmd
 				gcode = self._regex_command.search(cmd)
 				if gcode:
 					gcode = gcode.group(1)
@@ -1092,7 +1145,11 @@ class MachineCom(object):
 			lineNumber = self._currentLine
 			self._addToLastLines(cmd)
 			self._currentLine += 1
-			self._doSendWithChecksum(cmd, lineNumber)
+			# self._doSendWithChecksum(cmd, lineNumber)
+			if self._grbl:
+				self._doSendWithoutChecksum(cmd)
+			else:
+				self._doSendWithChecksum(cmd, lineNumber)
 		else:
 			self._doSendWithoutChecksum(cmd)
 
@@ -1209,6 +1266,11 @@ class MachineCom(object):
 	def _gcode_M112(self, cmd): # It's an emergency what todo? Canceling the print should be the minimum
 		self.cancelPrint()
 		return cmd
+
+	def _gcode_M112(self, cmd): # It's an emergency what todo? Canceling the print should be the minimum
+		self.cancelPrint()
+		return cmd
+
 
 ### MachineCom callback ################################################################################################
 
