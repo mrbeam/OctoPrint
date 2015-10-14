@@ -814,6 +814,34 @@ $(function(){
 		self._cleanup_render_mess = function(){
 			$('#tmpSvg').remove();
 		};
+		
+		self.onTabChange = function (current, previous) {
+            if (current === "#workingArea") {
+                if (self.webcamDisableTimeout !== undefined) {
+                    clearTimeout(self.webcamDisableTimeout);
+                }
+                var webcamImage = $("#webcam_image");
+                var currentSrc = webcamImage.attr("src");
+                if (currentSrc === undefined || currentSrc.trim() == "") {
+                    var newSrc = CONFIG_WEBCAM_STREAM;
+                    if (CONFIG_WEBCAM_STREAM.lastIndexOf("?") > -1) {
+                        newSrc += "&";
+                    } else {
+                        newSrc += "?";
+                    }
+                    newSrc += new Date().getTime();
+
+                    self.updateRotatorWidth();
+                    webcamImage.attr("src", newSrc);
+                }
+            } else if (previous === "#workingArea") {
+                // only disable webcam stream if tab is out of focus for more than 5s, otherwise we might cause
+                // more load by the constant connection creation than by the actual webcam stream
+                self.webcamDisableTimeout = setTimeout(function () {
+                    $("#webcam_image").attr("src", "");
+                }, 5000);
+            }
+        };
 
 		self.onBeforeBinding = function(){
 			self.files.workingArea = self;
