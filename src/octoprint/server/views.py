@@ -245,8 +245,7 @@ def index():
 	#~~ prepare full set of template vars for rendering
 
 	render_kwargs = dict(
-		#webcamStream=settings().get(["webcam", "stream"]),
-		webcamStream=True,
+		webcamStream=settings().get(["webcam", "stream"]),
 		enableTemperatureGraph=settings().get(["feature", "temperatureGraph"]),
 		enableAccessControl=userManager is not None,
 		enableSdSupport=settings().get(["feature", "sdSupport"]),

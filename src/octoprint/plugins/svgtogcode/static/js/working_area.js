@@ -44,6 +44,8 @@ $(function(){
 				}
 				var dim = [w,h];
 				return dim;
+			} else {
+				return [0,0];
 			}
 		});
 
@@ -97,7 +99,7 @@ $(function(){
 
 
 		self.trigger_resize = function(){
-			if(typeof(snap) !== 'undefined') self.abortFreeTransforms();
+			self.abortFreeTransforms();
 			self.availableHeight(document.documentElement.clientHeight - $('body>nav').outerHeight()  - $('footer>*').outerHeight() - 39); // magic number
 			self.availableWidth($('#workingarea div.span8').innerWidth());
 		};
@@ -611,12 +613,14 @@ $(function(){
 		};
 
 		self.abortFreeTransforms = function(){
-			var tip = snap.selectAll('._freeTransformInProgress');
-			for (var i = 0; i < tip.length; i++) {
-				var el = tip[i];
-				el.ftRemoveHandles();
+			if(typeof(snap) !== 'undefined'){
+				var tip = snap.selectAll('._freeTransformInProgress');
+				for (var i = 0; i < tip.length; i++) {
+					var el = tip[i];
+					el.ftRemoveHandles();
+				}
+				self.check_sizes_and_placements();
 			}
-			self.check_sizes_and_placements();
 		};
 
 		self.getCompositionSVG = function(callback){
@@ -816,7 +820,11 @@ $(function(){
 		};
 		
 		self.onTabChange = function (current, previous) {
-            if (current === "#workingArea") {
+            if (current === "#workingarea") {
+
+				//self.trigger_resize();
+				//self.check_sizes_and_placements();
+				
                 if (self.webcamDisableTimeout !== undefined) {
                     clearTimeout(self.webcamDisableTimeout);
                 }
@@ -831,7 +839,7 @@ $(function(){
                     }
                     newSrc += new Date().getTime();
 
-                    self.updateRotatorWidth();
+                    //self.updateRotatorWidth();
                     webcamImage.attr("src", newSrc);
                 }
             } else if (previous === "#workingArea") {
@@ -852,6 +860,6 @@ $(function(){
     // view model class, parameters for constructor, container to bind to
     ADDITIONAL_VIEWMODELS.push([WorkingAreaViewModel,
 		["loginStateViewModel", "settingsViewModel", "printerStateViewModel",  "gcodeFilesViewModel"],
-		[document.getElementById("area_preview"), document.getElementById("working_area_files")]]);
+		[document.getElementById("area_preview"), document.getElementById("working_area_files"), document.getElementById("webcam_container")]]);
 
 });

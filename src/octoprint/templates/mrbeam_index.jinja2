@@ -20,7 +20,7 @@
 					</a>
 				</div>
 				<!-- Navbar -->
-				<ul class="nav nav-pills">
+				<ul class="nav nav-pills" id="tabs">
 					<li class="active"><a href="#workingarea" data-toggle="tab" id="wa_tab_btn">working area</a></li>
 					<li><a href="#designlib" data-toggle="tab">design library</a></li>
 					<li><a href="#focus" data-toggle="tab">focus</a></li>
@@ -272,13 +272,16 @@
 							<div class="span8">
 								<div style="position:relative">
 									{% if webcamStream %}
-										<div id="webcam_container" tabindex="0" style="position:absolute; top:0;left:0">
+										<div id="webcam_container" tabindex="0" 
+											 style="position:absolute; top:0;left:0"
+											 data-bind="style: {
+												width: workingAreaWidthPx()+'px'
+											}">
 											<div id="webcam_rotator" data-bind="css: { rotate90: settings.webcam_rotate90() }">
 												<img id="webcam_image" 
 													data-bind="css: { flipH: settings.webcam_flipH(), flipV: settings.webcam_flipV() },
 															style: {
 																width: workingAreaWidthPx()+'px',
-																height: workingAreaHeightPx()+'px'
 															}"/>
 											</div>
 										</div>
