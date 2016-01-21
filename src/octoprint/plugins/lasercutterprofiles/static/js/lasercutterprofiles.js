@@ -16,7 +16,9 @@ $(function() {
                 formFactor: "rectangular",
                 width: 216,
                 depth: 297,
-                height: 0
+                height: 0,
+				origin_offset_x: 1,
+				origin_offset_y: 1
             },
             zAxis: false,
             axes: {
@@ -108,8 +110,8 @@ $(function() {
         self.currentProfile(currentProfile);
         self.currentProfileData(currentProfileData);
 		
-		self.workingarea.workingAreaWidthMM(self.currentProfileData().volume.width());
-		self.workingarea.workingAreaHeightMM(self.currentProfileData().volume.depth());
+		self.workingarea.workingAreaWidthMM(self.currentProfileData().volume.width() - self.currentProfileData().volume.origin_offset_x());
+		self.workingarea.workingAreaHeightMM(self.currentProfileData().volume.depth() - self.currentProfileData().volume.origin_offset_y());
 		var maxSpeed = Math.min(self.currentProfileData().axes.x.speed(), self.currentProfileData().axes.y.speed());
 		self.conversion.maxSpeed(maxSpeed);
     };

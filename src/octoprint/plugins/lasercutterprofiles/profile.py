@@ -29,9 +29,11 @@ class LaserCutterProfileManager(object):
 		name = "Mr Beam",
 		model = "Junior",
 		volume=dict(
-			width = 216,
-			depth = 297,
+			width = 217,
+			depth = 298,
 			height = 0,
+			origin_offset_x = 1.1,
+			origin_offset_y = 1.1,
 		),
 		zAxis = False,
 		axes=dict(

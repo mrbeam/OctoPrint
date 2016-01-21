@@ -204,23 +204,7 @@ class FileManager(object):
 					source_meta = self.get_metadata(source_location, source_path)
 					hash = source_meta["hash"]
 
-#<<<<<<< HEAD
-#					class Wrapper(object):
-#						def __init__(self, stl_name, temp_path, hash):
-#							self.stl_name = stl_name
-#							self.temp_path = temp_path
-#							self.hash = hash
-#
-#						def save(self, absolute_dest_path):
-#							with open(absolute_dest_path, "w") as d:
-#								d.write("; Generated from\n; {stl_name}\n; {hash}\r".format(**vars(self)))
-#								with open(tmp_path, "r") as s:
-#									import shutil
-#									shutil.copyfileobj(s, d)
-#
-#=======
 					import io
-#>>>>>>> upstream/maintenance
 					links = [("model", dict(name=source_path))]
 					_, stl_name = self.split_path(source_location, source_path)
 					file_obj = StreamWrapper(os.path.basename(dest_path),

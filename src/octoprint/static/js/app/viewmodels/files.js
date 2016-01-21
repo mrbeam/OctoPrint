@@ -100,7 +100,7 @@ $(function() {
                 });
             }
         };
-		
+
         self.fromCurrentData = function(data) {
             self._processStateData(data.state);
         };
@@ -138,7 +138,7 @@ $(function() {
                 }
             });
         };
-             
+
         self.fromResponse = function(response, filenameToFocus, locationToFocus) {
             var files = response.files;
             _.each(files, function(element, index, list) {
@@ -267,7 +267,7 @@ $(function() {
 				return "files_template_dummy";
 			}
 		};
-		
+
         self.getEntryId = function(data) {
             return "gcode_file_" + md5(data["origin"] + ":" + data["name"]);
         };
@@ -344,7 +344,7 @@ $(function() {
             }
             return output;
         };
-		
+
         self.performSearch = function(e) {
             if (e !== undefined) {
                 e.preventDefault();
@@ -375,7 +375,7 @@ $(function() {
 		self.enableSVGConversion = function (data) {
 			return self.loginState.isUser() && !(self.isPrinting() || self.isPaused());
 		};
-		
+
         self.onStartup = function() {
             $(".accordion-toggle[data-target='#files']").click(function() {
                 var files = $("#files");
@@ -610,11 +610,13 @@ $(function() {
 
 			$('#take_photo_dialog').on('shown', function () {
 				$('#photo_preview').photobooth();
-				var w = $('#photo_preview').width();
-				var h = $('#photo_preview').height();
+				var w = $('#photo_preview').parent().width()*0.98;
+				var h = w*3.0/4.0;
+				$('#photo_preview').height(h);
+				$('#photo_preview').width(w);
 				$('#photo_preview').data('photobooth').resize(w, h);
 			});
-			
+
 			$('#photo_preview').on("image", function (event, dataUrl) {
 				var photoBlob = self.dataUriToBlob(dataUrl);
 				var t = new Date();
@@ -660,7 +662,7 @@ $(function() {
 						);
 				return !!fGetUserMedia;
 			};
-			
+
 			self.dataUriToBlob = function(dataURI) {
 				// serialize the base64/URLEncoded data
 				var byteString;

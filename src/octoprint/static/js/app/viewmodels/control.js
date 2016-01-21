@@ -108,11 +108,11 @@ $(function() {
                 });
             }
         };
-
+		
 
         self.rerenderControls = function () {
             var allControls = self.controlsFromServer.concat(self.additionalControls);
-            self.controls(self._processControls(allControls))
+            self.controls(self._processControls(allControls));
         };
 
 		self.requestData = function () {

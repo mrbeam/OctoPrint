@@ -1888,22 +1888,34 @@ class MachineCom(object):
 		self._doSendWithoutChecksum(commandToSend)
 
 	def _doSendWithoutChecksum(self, cmd):
-		self._log("Send: %s" % cmd)
-		self.acc_line_lengths.append(len(cmd)+1) # Track number of characters in grbl serial read buffer
-		try:
-			self._serial.write(cmd + '\n')
-		except serial.SerialTimeoutException:
-			self._log("Serial timeout while writing to serial port, trying again.")
+		if cmd == "?":
+			try:
+				self._serial.write(cmd)
+			except serial.SerialTimeoutException:
+				self._log("Serial timeout while writing to serial port, trying again.")
+				try:
+					self._serial.write(cmd)
+				except:
+					self._log("Unexpected error while writing serial port: %s" % (get_exception_string()))
+					self._errorValue = get_exception_string()
+					self.close(True)
+		else:
+			self._log("Send: %s" % cmd)
+			self.acc_line_lengths.append(len(cmd)+1) # Track number of characters in grbl serial read buffer
 			try:
 				self._serial.write(cmd + '\n')
+			except serial.SerialTimeoutException:
+				self._log("Serial timeout while writing to serial port, trying again.")
+				try:
+					self._serial.write(cmd + '\n')
+				except:
+					self._log("Unexpected error while writing serial port: %s" % (get_exception_string()))
+					self._errorValue = get_exception_string()
+					self.close(True)
 			except:
 				self._log("Unexpected error while writing serial port: %s" % (get_exception_string()))
 				self._errorValue = get_exception_string()
 				self.close(True)
-		except:
-			self._log("Unexpected error while writing serial port: %s" % (get_exception_string()))
-			self._errorValue = get_exception_string()
-			self.close(True)
 
 	##~~ command handlers
 	def _gcode_H_sent(self, cmd, cmd_type=None):

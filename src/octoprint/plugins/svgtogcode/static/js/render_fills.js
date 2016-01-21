@@ -29,7 +29,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 	 * @returns {path}
 	 */
 
-	Element.prototype.removeUnfilled = function(){
+	Element.prototype.removeUnfilled = function(fillPaths){
 		var elem = this;
 		var selection = [];
 		var children = elem.children();
@@ -46,14 +46,18 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 			if(goRecursive) {
 				for (var i = 0; i < children.length; i++) {
 					var child = children[i];
-					selection = selection.concat(child.removeUnfilled());
+					selection = selection.concat(child.removeUnfilled(fillPaths));
 				}
 			}
 		} else {
-			if(elem.is_filled()){
+			if(elem.type === 'image'){
 				selection.push(elem);
 			} else {
-				elem.remove();
+				if(fillPaths && elem.is_filled()){
+					selection.push(elem);
+				} else {
+					elem.remove();
+				}
 			}
 		}
 		return selection;
@@ -70,14 +74,9 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 			elem.type !== "line" &&
 			elem.type !== "polygon" &&
 			elem.type !== "polyline" &&
-			elem.type !== "path" && 
-			elem.type !== "image"){
+			elem.type !== "path" ){
 			
 			return false;
-		}
-		
-		if(elem.type === 'image'){
-			return true;
 		}
 		
 		var fill = elem.attr('fill');

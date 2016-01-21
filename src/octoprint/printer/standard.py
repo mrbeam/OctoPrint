@@ -22,7 +22,7 @@ from octoprint.plugin import plugin_manager, ProgressPlugin
 from octoprint.printer import PrinterInterface, PrinterCallback, UnknownScript
 from octoprint.printer.estimation import TimeEstimationHelper
 from octoprint.settings import settings
-from octoprint.util import comm_acc as comm
+from octoprint.util import comm_acc2 as comm
 from octoprint.util import InvariantContainer
 
 

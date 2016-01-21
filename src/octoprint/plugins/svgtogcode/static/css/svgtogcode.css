@@ -1,6 +1,6 @@
 table th.settings_plugin_svgtogcode_profiles_key,table td.settings_plugin_svgtogcode_profiles_key{text-overflow:ellipsis;text-align:left;width:200px}table th.settings_plugin_svgtogcode_profiles_name,table td.settings_plugin_svgtogcode_profiles_name{text-overflow:ellipsis;text-align:left}table th.settings_plugin_svgtogcode_profiles_actions,table td.settings_plugin_svgtogcode_profiles_actions{text-align:center;width:100px}table th.settings_plugin_svgtogcode_profiles_actions a,table td.settings_plugin_svgtogcode_profiles_actions a{text-decoration:none;color:#000}table th.settings_plugin_svgtogcode_profiles_actions a.disabled,table td.settings_plugin_svgtogcode_profiles_actions a.disabled{color:#ccc;cursor:default}
 .slider_manual_input {
-	margin-left: 1.5em; 
+	margin-left: 1.5em;
 	width: 2.5em;
 }
 
@@ -22,7 +22,7 @@ table th.settings_plugin_svgtogcode_profiles_key,table td.settings_plugin_svgtog
 }
 
 .svgtogcode_grayscale {
-	background-image: linear-gradient(90deg, #FFFFFF, #000000); 
+	background-image: linear-gradient(90deg, #FFFFFF, #000000);
 	width:220px;
 	display: inline-block;
 }
@@ -37,7 +37,7 @@ svg text {
 	-ms-user-select: none;
 	cursor: default;
 	pointer-events: none;
-	
+
 }
 
 .img_slider{
@@ -60,8 +60,8 @@ svg text {
 	left:0;
 }
 
-.img_preprocessing_preview.after .contrast, 
-.img_preprocessing_preview.after .sharpened, 
+.img_preprocessing_preview.after .contrast,
+.img_preprocessing_preview.after .sharpened,
 .img_preprocessing_preview.after .sharpened_contrast {
 	opacity: 0;
 }
@@ -87,7 +87,18 @@ svg text {
 }
 
 #photo_preview {
-	width: 80vw;
-	height: 70vh;
+	width: 400px;
+	height: 300px;
 	margin: auto;
+}
+
+.overrideSlider {
+	margin-bottom: 8px;
+}
+
+.overrideSlider input {
+	width:45%;
+}
+.overrideSlider span {
+	padding-left: .6em;
 }

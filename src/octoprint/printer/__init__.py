@@ -23,7 +23,7 @@ __copyright__ = "Copyright (C) 2014 The OctoPrint Project - Released under terms
 
 import re
 
-import octoprint.util.comm_acc as comm
+import octoprint.util.comm_acc2 as comm
 import octoprint.util as util
 
 from octoprint.settings import settings

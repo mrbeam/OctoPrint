@@ -38,6 +38,12 @@
 						The effect in general is dependent from the material and its color and surface.
 					</div>
 				</div>
+				<label class="control-label">{{ _('Filled areas') }}</label>
+				<div class="controls">
+					<label class="checkbox">
+						<input type="checkbox" data-bind="checked: fill_areas">{{ _('Engrave Infills') }}
+					</label>
+				</div>
             </div>
 
 			<div class="control-group" data-bind="visible: showExpertSettings ">
@@ -176,7 +182,7 @@
 			</label>
 		</div>
 
-        <a href="#" class="btn" data-dismiss="modal" aria-hidden="true">{{ _('Cancel') }}</a>
+        <a href="#" class="btn" data-dismiss="modal" aria-hidden="true" data-bind="click: $root.cancel_conversion()">{{ _('Cancel') }}</a>
         <a href="#" class="btn btn-primary" data-bind="click: function() { if ($root.enableConvertButton()) { $root.convert() } }, enabled: enableConvertButton, css: {disabled: !$root.enableConvertButton()}">{{ _('Convert') }}</a>
     </div>
 </div>

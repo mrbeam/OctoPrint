@@ -155,8 +155,20 @@
 												{{ _('Timelapse') }}: <strong data-bind="text: timelapseString"></strong><br>
 												-->
 												{{ _('Approx. Total Job Time') }}: <strong data-bind="text: estimatedPrintTimeString"></strong><br>
-												<div class="progress" data-bind="visible: isPrinting() || isPaused()">
-													<div class="bar" id="job_progressBar" data-bind="style: { width: progressString() + '%' }">&nbsp;{{ _('Processed') }} :  <strong data-bind="text: byteString"></strong></div>
+												<div data-bind="visible: isPrinting() || isPaused()">
+													
+													<div class="progress">
+														<div class="bar" id="job_progressBar" data-bind="style: { width: progressString() + '%' }">&nbsp;{{ _('Processed') }} :  <strong data-bind="text: byteString"></strong></div>
+													</div>
+													<div class="overrideSlider">
+														<input id="intensity_override_slider" type="text" data-bind="sliderValue: intensityOverride">
+														<span data-bind="text:intensityOverride()">100</span>% Intensity
+													</div>
+													<div class="overrideSlider">
+														<input id="feedrate_override_slider" type="text" data-bind="sliderValue: feedrateOverride">
+														<span data-bind="text:feedrateOverride()">100</span>% Feedrate
+													</div>
+
 												</div>
 												<!--                                {{ _('Print Time') }}: <strong data-bind="text: printTimeString"></strong><br>
 																				{{ _('Print Time Left') }}: <strong data-bind="text: printTimeLeftString"></strong><br>-->
@@ -270,69 +282,70 @@
 							<!--  end sidebar  -->
 
 							<div class="span8">
-								<div style="position:relative">
-									{% if webcamStream %}
-										<div id="webcam_container" tabindex="0" 
-											 style="position:absolute; top:0;left:0"
-											 data-bind="style: {
-												width: workingAreaWidthPx()+'px'
-											}">
-											<div id="webcam_rotator" data-bind="css: { rotate90: settings.webcam_rotate90() }">
-												<img id="webcam_image" 
-													data-bind="css: { flipH: settings.webcam_flipH(), flipV: settings.webcam_flipV() },
-															style: {
-																width: workingAreaWidthPx()+'px',
-															}"/>
-											</div>
-										</div>
-									{% endif %}
-									<svg id="area_preview" class="workingarea"
-										 data-bind="style: {
-												backgroundPosition: crosshairX()+'px'+' '+crosshairY()+'px',
-												width: workingAreaWidthPx()+'px',
-												height: workingAreaHeightPx()+'px'
-											}
-										 ">
-										<filter id="grayscale_filter">
-											<feColorMatrix in="SourceGraphic" type="saturate" values="0"/>
-										</filter>
-										<filter id="gcimage_preview">
-											<feComponentTransfer>
-												<feFuncR type="table" tableValues="1"></feFuncR>
-												<feFuncG type="table" tableValues="0.2 1"></feFuncG>
-												<feFuncB type="table" tableValues="0.2 1"></feFuncB>
-											</feComponentTransfer>
-										</filter>
-										<g id="scaleGroup" data-bind="attr: { transform: scaleMatrix() }">
-											<rect data-bind="click: move_laser"
-												  id="coordGrid" x="0" y="0" width="0" height="0"
-												  stroke="none" fill="none"></rect>
-											<text
-												xml:space="preserve"
-												data-bind="visible: working_area_empty"
-												style="font-size:64px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;line-height:125%;letter-spacing:0px;word-spacing:0px;fill:#DDDDDD;fill-opacity:1;stroke:none;font-family:DIN-BoldAlternate;-inkscape-font-specification:DIN-BoldAlternate Bold"
-												x="396.81018"
-												y="552.36218"
-												id="add_designs_hint"
-												>
-											<tspan
-												  id="tspan2987" x="368.571426" y="532.36218"
-												  style="text-anchor:middle;text-align:center">add designs via </tspan>
-											<tspan
-												  x="500" y="592.36218" id="tspan2989"
-												  style="text-anchor:middle;text-align:center">the design library </tspan>
-											<tspan
-												  x="568.571426" y="652.36218" id="tspan2993"
-												  style="text-anchor:middle;text-align:center">or drag 'n' drop </tspan>
-											<tspan
-												  x="368.571426" y="712.36218" id="tspan2991"
-												  style="text-anchor:middle;text-align:center" /></text>
-											<g id="userContent" data-bind="visible: !state.isPrinting() && !state.isPaused()"></g>
-											<g id="placedGcodes" data-bind="visible: !state.isPrinting() && !state.isPaused(), attr: { transform: scaleMatrixMMtoDisplay() }"></g>
-											<g id="gCodePreview" data-bind="visible: state.isPrinting() || state.isPaused(), attr: { transform: scaleMatrixMMtoDisplay() }"></g>
-										</g>
-									</svg>
-								</div>
+                                <div style="position:relative">
+                                    {% if webcamStream %}
+                                        <div id="webcam_container" tabindex="0"
+                                             style="position:absolute; top:0;left:0"
+                                             data-bind="style: {
+                                                width: workingAreaWidthPx()+'px'
+                                            }">
+                                            <div id="webcam_rotator" data-bind="css: { rotate90: settings.webcam_rotate90() }">
+                                                <img id="webcam_image"
+                                                    data-bind="css: { flipH: settings.webcam_flipH(), flipV: settings.webcam_flipV() },
+                                                            style: {
+                                                                width: workingAreaWidthPx()+'px',
+                                                            }"/>
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                    <svg id="area_preview" class="workingarea"
+                                         data-bind="style: {
+                                                backgroundPosition: crosshairX()+'px'+' '+crosshairY()+'px',
+                                                width: workingAreaWidthPx()+'px',
+                                                height: workingAreaHeightPx()+'px'
+                                            }
+                                         ">
+                                        <filter id="grayscale_filter">
+                                            <feColorMatrix in="SourceGraphic" type="saturate" values="0"/>
+                                        </filter>
+                                        <filter id="gcimage_preview">
+                                            <feComponentTransfer>
+                                                <feFuncR type="table" tableValues="1"></feFuncR>
+                                                <feFuncG type="table" tableValues="0.2 1"></feFuncG>
+                                                <feFuncB type="table" tableValues="0.2 1"></feFuncB>
+                                            </feComponentTransfer>
+                                        </filter>
+                                        <g id="scaleGroup" data-bind="attr: { transform: scaleMatrix() }">
+
+                                            <text
+                                                xml:space="preserve"
+                                                data-bind="visible: working_area_empty"
+                                                style="font-size:64px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;line-height:125%;letter-spacing:0px;word-spacing:0px;fill:#DDDDDD;fill-opacity:1;stroke:none;font-family:DIN-BoldAlternate, Helvetica, Arial, Sans-serif;"
+                                                x="396.81018"
+                                                y="552.36218"
+                                                id="add_designs_hint"
+                                                >
+                                            <tspan
+                                                  id="tspan2987" x="368.571426" y="532.36218"
+                                                  style="text-anchor:middle;text-align:center">add designs via </tspan>
+                                            <tspan
+                                                  x="500" y="592.36218" id="tspan2989"
+                                                  style="text-anchor:middle;text-align:center">the design library </tspan>
+                                            <tspan
+                                                  x="568.571426" y="652.36218" id="tspan2993"
+                                                  style="text-anchor:middle;text-align:center">or drag 'n' drop </tspan>
+                                            <tspan
+                                                  x="368.571426" y="712.36218" id="tspan2991"
+                                                  style="text-anchor:middle;text-align:center" /></text>
+                                            <g id="placedGcodes" data-bind="visible: !state.isPrinting() && !state.isPaused(), attr: { transform: scaleMatrixMMtoDisplay() }"></g>
+                                            <g id="gCodePreview" data-bind="visible: state.isPrinting() || state.isPaused(), attr: { transform: scaleMatrixMMtoDisplay() }"></g>
+                                            <rect data-bind="click: move_laser"
+                                                  id="coordGrid" x="0" y="0" width="0" height="0"
+                                                  stroke="none" fill="none"></rect>
+                                            <g id="userContent" data-bind="visible: !state.isPrinting() && !state.isPaused()"></g>
+                                        </g>
+                                    </svg>
+                                </div>
 							</div>
 						</div>
 					</div>
