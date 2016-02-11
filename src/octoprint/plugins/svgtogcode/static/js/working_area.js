@@ -64,7 +64,8 @@ $(function(){
 		// matrix scales svg units to display_pixels
 		self.scaleMatrix = ko.computed(function(){
 			var m = new Snap.Matrix();
-			var factor = 25.4/self.svgDPI() * 1/self.px2mm_factor();
+			//var factor = 25.4/self.svgDPI() * 1/self.px2mm_factor();
+			var factor = 1
 			if(!isNaN(factor)){
 				m.scale(factor);
 				return m;
@@ -573,18 +574,18 @@ $(function(){
 		self.draw_coord_grid = function(){
 			var grid = snap.select('#coordGrid');
 			if(grid.attr('fill') === 'none'){
-				var w = self.mm2svgUnits(self.workingAreaWidthMM());
-				var h = self.mm2svgUnits(self.workingAreaHeightMM());
+				var w = self.workingAreaWidthMM();
+				var h = self.workingAreaHeightMM();
 				var max_lines = 20;
 
 				var linedistMM = Math.floor(Math.max(self.workingAreaWidthMM(), self.workingAreaHeightMM()) / (max_lines * 10))*10;
-				var yPatternOffset = self.mm2svgUnits(self.workingAreaHeightMM() % linedistMM);
-				var linedist = self.mm2svgUnits(linedistMM);
+				var yPatternOffset = self.workingAreaHeightMM() % linedistMM;
+				var linedist = linedistMM;
 
-				var marker = snap.circle(linedist/2, linedist/2, 1).attr({
+				var marker = snap.circle(linedist/2, linedist/2, self.px2mm(1)).attr({
 					fill: "#000000",
 					stroke: "none",
-					strokeWidth: 1
+					strokeWidth: self.px2mm(1)
 				});
 
 				// dot pattern
