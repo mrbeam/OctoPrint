@@ -79,7 +79,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 			handleFill: "red",
 			handleStrokeDashPreset: [5,5],
 			handleStrokeWidth: 2,
-			handleLength: 18,
+			handleLength: 10,
 			handleRadius: 16, 
 			unscale: 1,
 			handleStrokeDash: "5,5",
@@ -135,7 +135,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 			this.data("ty", 0);
 			this.attr({class:'_freeTransformInProgress'});
 			
-			ftOption.unscale = 1 / this.paper.select('#scaleGroup').transform().localMatrix.a;
+			ftOption.unscale = 1 / this.paper.select('#scaleGroup').transform().globalMatrix.a;
 			this.data('unscale', ftOption.unscale);
 			ftOption.handleStrokeDash = ftOption.handleStrokeDashPreset.map(function(v){ return v*ftOption.unscale; }).join(',');
 			return this;
@@ -298,7 +298,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 		if(!mainEl.data('block_rotation')){
 			var angle = Snap.angle( mainBB.cx, mainBB.cy, handle.attr('cx'), handle.attr('cy') ) - 180;
 			if(event.shiftKey){
-				angle = Math.round(angle/30) * 30;
+				angle = Math.round(angle/15) * 15;
 			} 
 			mainEl.data("angle", angle );
 		}

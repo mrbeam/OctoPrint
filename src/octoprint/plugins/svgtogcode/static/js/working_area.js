@@ -65,7 +65,7 @@ $(function(){
 		self.scaleMatrix = ko.computed(function(){
 			var m = new Snap.Matrix();
 			//var factor = 25.4/self.svgDPI() * 1/self.px2mm_factor();
-			var factor = 1
+			var factor = 1;
 			if(!isNaN(factor)){
 				m.scale(factor);
 				return m;
@@ -239,8 +239,9 @@ $(function(){
 				}
 
 				// scale matrix
+				var scale = self.svgDPI()/25.4;
 				var mat = self.getDocumentViewBoxMatrix(doc_width, doc_height, doc_viewbox);
-				var scaleMatrixStr = new Snap.Matrix(mat[0][0],mat[0][1],mat[1][0],mat[1][1],mat[0][2],mat[1][2]).toTransformString();
+				var scaleMatrixStr = new Snap.Matrix(mat[0][0]/scale,mat[0][1],mat[1][0],mat[1][1]/scale,mat[0][2],mat[1][2]).toTransformString();
 				newSvgAttrs['transform'] = scaleMatrixStr;
 
 				var newSvg = snap.group(f.selectAll("svg>*"));
@@ -582,10 +583,10 @@ $(function(){
 				var yPatternOffset = self.workingAreaHeightMM() % linedistMM;
 				var linedist = linedistMM;
 
-				var marker = snap.circle(linedist/2, linedist/2, self.px2mm(1)).attr({
+				var marker = snap.circle(linedist/2, linedist/2, 1).attr({
 					fill: "#000000",
 					stroke: "none",
-					strokeWidth: self.px2mm(1)
+					strokeWidth: 1
 				});
 
 				// dot pattern
