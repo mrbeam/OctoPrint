@@ -347,6 +347,7 @@ class MachineCom(object):
 	def _handle_ok_message(self):
 		if self._state == self.STATE_HOMING:
 			self._changeState(self.STATE_OPERATIONAL)
+			self._onHomingDone()
 
 	def _handle_error_message(self, line):
 		self._errorValue = line
@@ -538,6 +539,11 @@ class MachineCom(object):
 
 		payload = dict(port=self._port, baudrate=self._baudrate)
 		eventManager().fire(Events.CONNECTED, payload)
+
+	def _onHomingDone(self):
+		self.sendCommand("G92X500Y0Z0")
+		self.sendCommand("G90")
+		self.sendCommand("G21")
 
 	def _detectPort(self, close):
 		self._log("Serial port list: %s" % (str(serialList())))
