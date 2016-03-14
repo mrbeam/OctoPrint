@@ -347,7 +347,7 @@ $(function(){
 				dx = -svgBB.x + 0.01;
 				outside = true;
 			} else if(svgBB.x2 > waBB.x2){
-				dx = -svgBB.x2 + waBB.x2 - 0.01;
+				dx = -svgBB.x + 0.01;
 				outside = true;
 			}
 			if(svgBB.y < waBB.y){
@@ -760,7 +760,12 @@ $(function(){
 		self._embedAllImages = function(svg, callback){
 			
 			var allImages = svg.selectAll('image');
-			var linkedImages = allImages.items.filter(function(i){ return !i.attr('href').startsWith('data:') });
+			var linkedImages = allImages.items.filter(function(i){
+				if(i.attr('xlink:href') != null) {
+					return !i.attr('xlink:href').startsWith('data:');
+				} else if(i.attr('href') != null) {
+					return !i.attr('href').startsWith('data:');
+				}});
 			if(linkedImages.length > 0){
 				var callbackCounter = linkedImages.length;
 				for (var i = 0; i < linkedImages.length; i++) {

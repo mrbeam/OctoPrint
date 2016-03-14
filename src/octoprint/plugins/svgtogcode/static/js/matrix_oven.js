@@ -70,12 +70,14 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 
 			// Validity checks from http://www.w3.org/TR/SVG/shapes.html#RectElement:
 			// If 'x' and 'y' are not specified, then set both to 0. // CorelDraw is creating that sometimes
-			if (!isFinite(x))
+			if (!isFinite(x)) {
 				console.log('No attribute "x" in image tag. Assuming 0.')
 				x = 0;
-			if (!isFinite(y))
+			}
+			if (!isFinite(y)) {
 				console.log('No attribute "y" in image tag. Assuming 0.')
 				y = 0;
+			}
 			var transform = elem.transform();
 			var matrix = transform['totalMatrix'];
 			var transformedX = matrix.x(x, y);
