@@ -13,7 +13,7 @@ from octoprint.settings import settings, valid_boolean_trues
 from octoprint.server import printer, fileManager, slicingManager, eventManager, NO_CONTENT
 from octoprint.server.util.flask import restricted_access, get_json_command_from_request
 from octoprint.server.api import api
-from octoprint.events import Events
+from octoprint.events import eventManager, Events
 import octoprint.filemanager
 import shutil
 import octoprint.filemanager.util
@@ -419,7 +419,7 @@ def gcodeFileCommand(filename, target):
 @restricted_access
 def gcodeConvertCommand():
 	target = FileDestinations.LOCAL;
-	
+
 	# valid file commands, dict mapping command name to mandatory parameters
 	valid_commands = {
 		"convert": []
@@ -427,14 +427,14 @@ def gcodeConvertCommand():
 	command, data, response = get_json_command_from_request(request, valid_commands)
 	if response is not None:
 		return response
-	
+
 	appendGcodeFiles = data['gcodeFilesToAppend']
 	del data['gcodeFilesToAppend']
-	
+
 #	def appendCallback(location, path, sources, **kwargs):
 #		if '_error' in kwargs:
 #			result = kwargs['_error']
-#			return make_response("Could not slice: {result}".format(result=result), 500)		
+#			return make_response("Could not slice: {result}".format(result=result), 500)
 #		else:
 #			output_path = fileManager.path_on_disk(location, path)
 #			# append additioal gcodes
@@ -461,18 +461,16 @@ def gcodeConvertCommand():
 #			#r = make_response(jsonify(result), 202)
 #			#r.headers["Location"] = location
 #			#return r
-		
 
-		
 	if command == "convert":
 		# TODO stripping non-ascii is a hack - svg contains lots of non-ascii in <text> tags. Fix this!
 		import re
-		svg = ''.join(i for i in data['svg'] if ord(i)<128) # strip non-ascii chars like € 
-		del data['svg']	
-		
+		svg = ''.join(i for i in data['svg'] if ord(i)<128) # strip non-ascii chars like €
+		del data['svg']
+
 		import os
 		name, _ = os.path.splitext(data['gcode'])
-		
+
 		filename = target + "/temp.svg"
 		class Wrapper(object):
 			def __init__(self, filename, content):
@@ -486,7 +484,7 @@ def gcodeConvertCommand():
 
 		fileObj = Wrapper(filename, svg)
 		fileManager.add_file(target, filename, fileObj, links=None, allow_overwrite=True)
-		
+
 		slicer = "svgtogcode";
 		slicer_instance = slicingManager.get_slicer(slicer)
 		if slicer_instance.get_slicer_properties()["same_device"] and (printer.is_printing() or printer.is_paused()):
@@ -500,7 +498,7 @@ def gcodeConvertCommand():
 			import os
 			name, _ = os.path.splitext(filename)
 			gcode_name = name + ".gco"
-			
+
 		# append number if file exists
 		name, ext = os.path.splitext(gcode_name)
 		i = 1;
@@ -518,7 +516,7 @@ def gcodeConvertCommand():
 			del data["profile"]
 		else:
 			profile = None
-##
+
 		if "printerProfile" in data.keys() and data["printerProfile"]:
 			printerProfile = data["printerProfile"]
 			del data["printerProfile"]
@@ -530,7 +528,7 @@ def gcodeConvertCommand():
 			del data["position"]
 		else:
 			position = None
-			
+
 		select_after_slicing = False
 		if "select" in data.keys() and data["select"] in valid_boolean_trues:
 			if not printer.is_operational():
@@ -548,34 +546,41 @@ def gcodeConvertCommand():
 		for key in override_keys:
 			overrides[key[len("profile."):]] = data[key]
 
-		def slicing_done(target, gcode_name, select_after_slicing, print_after_slicing, append_these_files):
-			# append additioal gcodes
+		if data.has_key('gcodedata'):
 			output_path = fileManager.path_on_disk(target, gcode_name)
-			with open(output_path,'ab') as wfd:
-				for f in append_these_files:
-					path = fileManager.path_on_disk(f['origin'], f['name'])
-					wfd.write( "\n; "+ f['name'] + "\n")
+			with open(output_path,'wb') as wfd:
+				for line in data['gcodedata']:
+					wfd.write(line)
+			eventManager().fire(Events.SLICING_DONE, {"stl": filename, "gcode": gcode_name, "gcode_location": target, "time": 1.0})
+		else:
+			def slicing_done(target, gcode_name, select_after_slicing, print_after_slicing, append_these_files):
+				# append additioal gcodes
+				output_path = fileManager.path_on_disk(target, gcode_name)
+				with open(output_path,'ab') as wfd:
+					for f in append_these_files:
+						path = fileManager.path_on_disk(f['origin'], f['name'])
+						wfd.write( "\n; "+ f['name'] + "\n")
 
-					with open(path,'rb') as fd:
-						shutil.copyfileobj(fd, wfd, 1024*1024*10)
+						with open(path,'rb') as fd:
+							shutil.copyfileobj(fd, wfd, 1024*1024*10)
 
-					wfd.write( "\nM05\n") # ensure that the laser is off.
+						wfd.write( "\nM05\n") # ensure that the laser is off.
 
-			if select_after_slicing or print_after_slicing:
-				sd = False
-				filenameToSelect = fileManager.path_on_disk(target, gcode_name)
-				printer.select_file(filenameToSelect, sd, True)
+				if select_after_slicing or print_after_slicing:
+					sd = False
+					filenameToSelect = fileManager.path_on_disk(target, gcode_name)
+					printer.select_file(filenameToSelect, sd, True)
 
-		try:
-			fileManager.slice(slicer, target, filename, target, gcode_name, 
-							  profile=profile,
-			                  printer_profile_id=printerProfile,
-			                  position=position,
-							  overrides=overrides, 
-							  callback=slicing_done, 
-							  callback_args=[target, gcode_name, select_after_slicing, print_after_slicing, appendGcodeFiles])
-		except octoprint.slicing.UnknownProfile:
-			return make_response("Profile {profile} doesn't exist".format(**locals()), 400)
+			try:
+				fileManager.slice(slicer, target, filename, target, gcode_name,
+								  profile=profile,
+								  printer_profile_id=printerProfile,
+								  position=position,
+								  overrides=overrides,
+								  callback=slicing_done,
+								  callback_args=[target, gcode_name, select_after_slicing, print_after_slicing, appendGcodeFiles])
+			except octoprint.slicing.UnknownProfile:
+				return make_response("Profile {profile} doesn't exist".format(**locals()), 400)
 
 		files = {}
 		location = url_for(".readGcodeFile", target=target, filename=gcode_name, _external=True)
@@ -593,7 +598,7 @@ def gcodeConvertCommand():
 		return r
 
 	return NO_CONTENT
-		
+
 
 @api.route("/files/<string:target>/<path:filename>", methods=["DELETE"])
 @restricted_access
