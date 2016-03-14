@@ -280,7 +280,7 @@ $(function(){
 
 					var snapelement = snap.select("#userContent");
 					snapelement.bake(false, 5);
-					data.gcodedata = snapelement.toGcode();
+					data.gcodedata = snapelement.toGcode(self.laserSpeed(),	self.laserIntensity(), self.pierceTime());
 
 					$.ajax({
 						url: API_BASEURL + "files/convert",
