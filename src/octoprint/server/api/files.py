@@ -13,7 +13,7 @@ from octoprint.settings import settings, valid_boolean_trues
 from octoprint.server import printer, fileManager, slicingManager, eventManager, NO_CONTENT
 from octoprint.server.util.flask import restricted_access, get_json_command_from_request
 from octoprint.server.api import api
-from octoprint.events import eventManager, Events
+from octoprint.events import Events
 import octoprint.filemanager
 import shutil
 import octoprint.filemanager.util
@@ -551,7 +551,7 @@ def gcodeConvertCommand():
 			with open(output_path,'wb') as wfd:
 				for line in data['gcodedata']:
 					wfd.write(line)
-			eventManager().fire(Events.SLICING_DONE, {"stl": filename, "gcode": gcode_name, "gcode_location": target, "time": 1.0})
+			eventManager.fire(Events.SLICING_DONE, {"stl": filename, "gcode": gcode_name, "gcode_location": target, "time": 1.0})
 		else:
 			def slicing_done(target, gcode_name, select_after_slicing, print_after_slicing, append_these_files):
 				# append additioal gcodes

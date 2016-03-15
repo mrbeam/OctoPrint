@@ -392,7 +392,7 @@ $(function(){
             });
 
 		};
-		
+
 		self.placeIMG = function (file) {
 			var url = self._getIMGserveUrl(file);
 			var img = new Image();
@@ -583,10 +583,9 @@ $(function(){
 				var yPatternOffset = self.workingAreaHeightMM() % linedistMM;
 				var linedist = linedistMM;
 
-				var marker = snap.circle(linedist/2, linedist/2, 1).attr({
+				var marker = snap.circle(linedist/2, linedist/2, 0.3).attr({
 					fill: "#000000",
-					stroke: "none",
-					strokeWidth: 1
+					stroke: "none"
 				});
 
 				// dot pattern
@@ -634,13 +633,13 @@ $(function(){
 
 			var userContent = snap.select("#userContent").clone();
 			compSvg.append(userContent);
-			
+
 			self.renderInfill(compSvg, fillAreas, wMM, hMM, 10, function(svgWithRenderedInfill){
 				callback( self._wrapInSvgAndScale(svgWithRenderedInfill));
 				$('#compSvg').remove();
 			});
 		};
-		
+
 		self._wrapInSvgAndScale = function(content){
 			var svgStr = content.innerSVG();
 			if(svgStr !== ''){
@@ -723,7 +722,7 @@ $(function(){
 		self.clear_gcode = function(){
 			snap.select('#gCodePreview').clear();
 		};
-		
+
 		self.onStartup = function(){
 			self.state.workingArea = self;
 			self.files.workingArea = self;
@@ -756,9 +755,9 @@ $(function(){
 				}
 			});
 		};
-		
+
 		self._embedAllImages = function(svg, callback){
-			
+
 			var allImages = svg.selectAll('image');
 			var linkedImages = allImages.items.filter(function(i){
 				if(i.attr('xlink:href') != null) {
@@ -797,7 +796,7 @@ $(function(){
 				var fillings = userContent.removeUnfilled(fillAreas);
 				for (var i = 0; i < fillings.length; i++) {
 					var item = fillings[i];
-					
+
 					if (item.type === 'image') {
 						// remove filter effects on images for proper rendering
 						var style = item.attr('style');
