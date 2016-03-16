@@ -216,6 +216,7 @@ $(function() {
 			$("#confirmation_dialog .confirmation_dialog_acknowledge").click(
 					function (e) {
 						if (typeof callback === 'function') {
+                            self.onEventPrintDone();
 							callback(e);
 							$("#confirmation_dialog").modal("hide");
 							$("#confirmation_dialog .confirmation_dialog_message").html('');
@@ -285,14 +286,14 @@ $(function() {
 		self.onEventRealTimeState = function(payload){
 			self.currentPos({x: payload.wx, y: payload.wy});
 		};
-		
+
 		self.intensityOverride.subscribe(function(factor){
 			self._overrideCommand("/intensity "+factor);
 		});
 		self.feedrateOverride.subscribe(function(factor){
 			self._overrideCommand("/feedrate "+factor);
 		});
-		
+
 		self._overrideCommand = function(command, callback) {
             $.ajax({
                 url: API_BASEURL + "printer/command",
@@ -307,7 +308,7 @@ $(function() {
                 }
             });
         };
-		
+
 		self._configureOverrideSliders = function() {
 			self.intensityOverrideSlider = $("#intensity_override_slider").slider({
 				step: 1,
@@ -318,7 +319,7 @@ $(function() {
 			}).on("slideStop", function(ev){
 				self.intensityOverride(ev.value);
 			});
-			
+
 			self.feedrateOverrideSlider = $("#feedrate_override_slider").slider({
 				step: 1,
 				min: 10,
@@ -330,14 +331,14 @@ $(function() {
 			});
 
 		};
-		
+
 		self.onEventPrintDone = function(){
 			self.feedrateOverrideSlider.slider('setValue', 100);
 			self.intensityOverrideSlider.slider('setValue', 100);
 			self.intensityOverride(100);
 			self.feedrateOverride(100);
 		};
-		
+
 		self.onStartup = function() {
 			self._configureOverrideSliders();
 		};

@@ -428,10 +428,16 @@ $(function(){
 		};
 
 		self.getUsefulDimensions = function(wpx, hpx){
-			var maxWidthMM = wpx * 0.25; // TODO parametrize
-			var aspectRatio = wpx / hpx;
-			var destWidthMM = Math.min(self.workingAreaWidthMM() - 2, maxWidthMM);
-			var destHeightMM = destWidthMM / aspectRatio;
+			var maxWidthMM   = wpx * 0.25; // TODO parametrize
+			var maxHeightMM  = hpx * 0.25; // TODO parametrize
+			var aspectRatio  = wpx / hpx;
+			var destWidthMM  = Math.min(self.workingAreaWidthMM() - 2, maxWidthMM);
+			var destHeightMM = Math.min(self.workingAreaHeightMM() - 2, maxHeightMM);
+			if ((destWidthMM / aspectRatio) > destHeightMM) {
+				destWidthMM = destHeightMM * aspectRatio;
+			} else {
+				destHeightMM = destWidthMM / aspectRatio;
+			}
 			var destWidthPT = self.mm2svgUnits(destWidthMM);
 			var destHeightPT = self.mm2svgUnits(destHeightMM);
 			return [destWidthPT, destHeightPT];

@@ -824,6 +824,10 @@ class MachineCom(object):
 		if self._currentFile is None:
 			raise ValueError("No file selected for printing")
 
+		# reset feedrate and intesity factor in case they where changed in a previous run
+		self._feedrate_factor  = 1
+		self._intensity_factor = 1
+
 		try:
 			# ensure fan is on whatever gcode follows.
 			self.sendCommand("M08")
