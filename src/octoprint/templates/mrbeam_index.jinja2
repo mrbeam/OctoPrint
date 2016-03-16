@@ -156,7 +156,7 @@
 												-->
 												{{ _('Approx. Total Job Time') }}: <strong data-bind="text: estimatedPrintTimeString"></strong><br>
 												<div data-bind="visible: isPrinting() || isPaused()">
-													
+
 													<div class="progress">
 														<div class="bar" id="job_progressBar" data-bind="style: { width: progressString() + '%' }">&nbsp;{{ _('Processed') }} :  <strong data-bind="text: byteString"></strong></div>
 													</div>
@@ -307,23 +307,21 @@
 										<text
 											xml:space="preserve"
 											data-bind="visible: working_area_empty"
-											style="font-size:64px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;line-height:125%;letter-spacing:0px;word-spacing:0px;fill:#DDDDDD;fill-opacity:1;stroke:none;font-family:DIN-BoldAlternate, Helvetica, Arial, Sans-serif;"
+											style="font-size:12px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;line-height:125%;letter-spacing:0px;word-spacing:0px;fill:#DDDDDD;fill-opacity:1;stroke:none;font-family:DIN-BoldAlternate, Helvetica, Arial, Sans-serif;"
 											x="396.81018"
 											y="552.36218"
 											id="add_designs_hint"
 											>
 										<tspan
-											  id="tspan2987" x="368.571426" y="532.36218"
-											  style="text-anchor:middle;text-align:center">add designs via </tspan>
+											  id="tspan2987" x="60" y="60"
+											  style="text-anchor:left;text-align:center">add designs via </tspan>
 										<tspan
-											  x="500" y="592.36218" id="tspan2989"
-											  style="text-anchor:middle;text-align:center">the design library </tspan>
+											  x="70" y="75" id="tspan2989"
+											  style="text-anchor:left;text-align:center">the design library </tspan>
 										<tspan
-											  x="568.571426" y="652.36218" id="tspan2993"
-											  style="text-anchor:middle;text-align:center">or drag 'n' drop </tspan>
-										<tspan
-											  x="368.571426" y="712.36218" id="tspan2991"
-											  style="text-anchor:middle;text-align:center" /></text>
+											  x="80" y="90" id="tspan2993"
+											  style="text-anchor:left;text-align:center">or drag 'n' drop </tspan>
+										</text>
 										<g id="placedGcodes" data-bind="visible: !state.isPrinting() && !state.isPaused()"></g>
 										<g id="gCodePreview" data-bind="visible: state.isPrinting() || state.isPaused()"></g>
 										<rect data-bind="click: move_laser"
@@ -519,7 +517,7 @@
 												<i class="icon-camera icon-white"></i>
 												<span>{{ _('Photo') }}</span>
 											</a>
-												
+
 										</div>
 										<div id="gcode_upload_progress" class="progress" style="width: 100%;">
 											<div class="bar" style="width: 0%"></div>
