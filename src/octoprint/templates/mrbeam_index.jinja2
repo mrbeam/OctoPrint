@@ -9,25 +9,12 @@
 
 		{% include 'stylesheets.jinja2' %}
         {% include 'initscript.jinja2' %}
-		
-		<script type="text/javascript" >
-			function cycle_bg(){
-				var path = $('#cam').attr('xlink:href');
-				var m = path.match(/[0-9]+/);
-				var number = 0;
-				if(m.length > 0){
-					number = (parseInt(m[0]) + 1) % 12;
-				}
-				var nPath = "/plugin/svgtogcode/static/img/wa_preview/" + number + ".jpg";
-				$('#cam').attr('xlink:href', nPath);
-			}
-		</script>
     </head>
     <body>
 		<div class="container octoprint-container">
 		<nav class="navbar navbar-default navbar-fixed-top" role="navigation" id="navbar">
 			<div class="container">
-				<div class="navbar-header brand" style="min-width: 272px;" onclick="cycle_bg()">
+				<div class="navbar-header brand" style="min-width: 272px;">
 					<a class="navbar-brand" href="#" >
 						<img alt="Mr Beam Logo" src="{{ url_for('static', filename='img/mr-typo-red_x120.png') }}">
 					</a>
@@ -173,7 +160,7 @@
 												-->
 												{{ _('Approx. Total Job Time') }}: <strong data-bind="text: estimatedPrintTimeString"></strong><br>
 												<div data-bind="visible: isPrinting() || isPaused()">
-													
+
 													<div class="progress">
 														<div class="bar" id="job_progressBar" data-bind="style: { width: progressString() + '%' }">&nbsp;{{ _('Processed') }} :  <strong data-bind="text: byteString"></strong></div>
 													</div>
@@ -196,7 +183,7 @@
 															</button>
 														</div>
 														<span>Passes</span>
-														
+
 													</div>
 
 												</div>
@@ -329,7 +316,7 @@
 											<feFuncB type="table" tableValues="0.2 1"></feFuncB>
 										</feComponentTransfer>
 									</filter>
-									<image id="cam" xlink:href="/plugin/svgtogcode/static/img/wa_preview/0.jpg" x="0" y="0" 
+									<image id="cam" xlink:href="/plugin/svgtogcode/static/img/wa_preview/0.jpg" x="0" y="0"
 										   height="0px" width="0px" data-bind="attr: { width: workingAreaWidthPx()+'px', height: workingAreaHeightPx()+'px'}" />
 
 									<g id="scaleGroup" data-bind="attr: { transform: scaleMatrix() }">
@@ -549,7 +536,7 @@
 												<i class="icon-camera icon-white"></i>
 												<span>{{ _('Photo') }}</span>
 											</a>
-												
+
 										</div>
 										<div id="gcode_upload_progress" class="progress" style="width: 100%;">
 											<div class="bar" style="width: 0%"></div>
