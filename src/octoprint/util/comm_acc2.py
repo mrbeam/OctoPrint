@@ -84,6 +84,8 @@ class MachineCom(object):
 		self._actual_intensity = None
 		self._feedrate_dict = {}
 		self._intensity_dict = {}
+		self._passes = 1
+		self._finished_passes = 0
 
 		# regular expressions
 		self._regex_command = re.compile("^\s*\$?([GM]\d+|[TH])")
@@ -164,8 +166,15 @@ class MachineCom(object):
 					if cmd is not None:
 						self.sendCommand(cmd)
 						self._callback.on_comm_progress()
-					elif len(self._acc_line_buffer) == 0:
-						self._set_print_finished()
+					else:
+						if self._finished_passes >= self._passes:
+							if len(self._acc_line_buffer) == 0:
+								self._set_print_finished()
+						self._currentFile.resetToBeginning()
+						cmd = self._getNext()
+						if cmd is not None:
+							self.sendCommand(cmd)
+							self._callback.on_comm_progress()
 
 				self._sendCommand()
 				self._send_event.wait(1)
@@ -311,7 +320,9 @@ class MachineCom(object):
 		if self._finished_currentFile is False:
 			line = self._currentFile.getNext()
 			if line is None:
-				self._finished_currentFile = True
+				self._finished_passes += 1
+				if self._finished_passes >= self._passes:
+					self._finished_currentFile = True
 			return line
 		else:
 			return None
@@ -830,6 +841,12 @@ class MachineCom(object):
 		if self._currentFile is None:
 			raise ValueError("No file selected for printing")
 
+		# reset feedrate and intesity factor in case they where changed in a previous run
+		self._feedrate_factor  = 1
+		self._intensity_factor = 1
+		self._passes = 1
+		self._finished_passes = 0
+
 		try:
 			# ensure fan is on whatever gcode follows.
 			self.sendCommand("M08")
@@ -900,10 +917,12 @@ class MachineCom(object):
 			eventManager().fire(Events.PRINT_PAUSED, payload)
 
 	def increasePasses(self):
-		self._log("increase Passes")
+		self._passes += 1
+		self._log("increased Passes to %d" % self._passes)
 
 	def degreasePasses(self):
-		self._log("degrease Passes")
+		self._passes -= 1
+		self._log("degrease Passes to %d" % self._passes)
 
 	def getStateString(self):
 		if self._state == self.STATE_NONE:
@@ -1166,6 +1185,12 @@ class PrintingGcodeFileInformation(PrintingFileInformation):
 			except:
 				pass
 		self._handle = None
+
+	def resetToBeginning(self):
+		"""
+		resets the file handle so you can read from the beginning again.
+		"""
+		self._handle = open(self._filename, "r")
 
 	def getNext(self):
 		"""

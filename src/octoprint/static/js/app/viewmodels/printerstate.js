@@ -217,6 +217,8 @@ $(function() {
 			$("#confirmation_dialog .confirmation_dialog_acknowledge").click(
 					function (e) {
 						if (typeof callback === 'function') {
+                            self.resetOverrideSlider();
+                            self.numberOfPasses(1);
 							callback(e);
 							$("#confirmation_dialog").modal("hide");
 							$("#confirmation_dialog .confirmation_dialog_message").html('');
@@ -286,8 +288,14 @@ $(function() {
 		self.onEventRealTimeState = function(payload){
 			self.currentPos({x: payload.wx, y: payload.wy});
 		};
-		
-		
+
+		self.intensityOverride.subscribe(function(factor){
+			self._overrideCommand("/intensity "+factor);
+		});
+		self.feedrateOverride.subscribe(function(factor){
+			self._overrideCommand("/feedrate "+factor);
+		});
+
 		self._overrideCommand = function(command, callback) {
             $.ajax({
                 url: API_BASEURL + "printer/command",
@@ -302,34 +310,30 @@ $(function() {
                 }
             });
         };
-		
+
 		self._configureOverrideSliders = function() {
 			self.intensityOverrideSlider = $("#intensity_override_slider").slider({
 				step: 1,
 				min: 10,
 				max: 200,
 				value: 100,
-				tooltip: 'hide'
-			}).on("slide", function(ev){
-				self.intensityOverride(ev.value);
+//				tooltip: 'hide'
 			}).on("slideStop", function(ev){
-				self._overrideCommand("/intensity "+self.intensityOverride());
+				self.intensityOverride(ev.value);
 			});
-			
+
 			self.feedrateOverrideSlider = $("#feedrate_override_slider").slider({
 				step: 1,
 				min: 10,
 				max: 200,
 				value: 100,
-				tooltip: 'hide'
-			}).on("slide", function(ev){
-				self.feedrateOverride(ev.value);
+//				tooltip: 'hide'
 			}).on("slideStop", function(ev){
-				self._overrideCommand("/feedrate "+self.feedrateOverride());
+				self.feedrateOverride(ev.value);
 			});
 
 		};
-		
+
 		self.increasePasses = function(){
 			self.numberOfPasses(self.numberOfPasses()+1);
             self._jobCommand("incpasses");
@@ -339,16 +343,20 @@ $(function() {
 			self.numberOfPasses(passes);
             self._jobCommand("degpasses");
 		}
-		
+
 		self.onEventPrintDone = function(){
-			self.feedrateOverrideSlider.slider('setValue', 100);
+			self.resetOverrideSlider();
+		};
+
+		self.onStartup = function() {
+			self._configureOverrideSliders();
+		};
+
+        self.resetOverrideSlider = function() {
+            self.feedrateOverrideSlider.slider('setValue', 100);
 			self.intensityOverrideSlider.slider('setValue', 100);
 			self.intensityOverride(100);
 			self.feedrateOverride(100);
-		};
-		
-		self.onStartup = function() {
-			self._configureOverrideSliders();
 		};
     }
 
