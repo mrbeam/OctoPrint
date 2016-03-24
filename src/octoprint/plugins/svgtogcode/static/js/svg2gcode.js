@@ -12,23 +12,24 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 
     gCodeList.push(";Generated with svg2gcode Version 0.1\n");
     gCodeList.push("G21\n");
-    gCodeList.push("G1F" + laserSpeed + "\n");
+    //gCodeList.push("G1F" + laserSpeed + "\n");
 
     svgWidth  = this.paper.attr('viewBox').width;
     svgHeight = this.paper.attr('viewBox').height;
+    feedrateSet = 0;
 
     var elem = this.selectAll("path");
     for (var i = 0; i < elem.length; i++) {
-      gCodeList.push(elem[i].pathStringToGCode(laserIntensity, pierceTime));
+      gCodeList.push(elem[i].pathStringToGCode(laserIntensity, laserSpeed, pierceTime));
     }
 
-    // For security reasons always append a M5 command
+    // Always append a M5 command to be sure the Laser is OFF
     gCodeList.push("\nM5");
 
     return gCodeList;
   }
 
-  Element.prototype.pathStringToGCode = function (laserIntensity, pierceTime) {
+  Element.prototype.pathStringToGCode = function (laserIntensity, laserSpeed, pierceTime) {
     if (this.type !== "path") {
       return this;
     }
@@ -39,12 +40,16 @@ Snap.plugin(function (Snap, Element, Paper, global) {
     var lastYstr = "";
     var xStr = "";
     var yStr = "";
-    var arr = Snap.parsePathString(this.realPath);
+    var laser = 0;
+    var arr = Snap.parsePathString(Snap.path.toAbsolute(this.realPath));
+    gcode.push(";NEW PATH STRING")
     for (var i = 0; i < arr.length; i++) {
       if (arr[i][0] == "M") {
         xStr = Math.round(arr[i][1] * 100) / 100;
         yStr = Math.round((svgHeight - arr[i][2]) * 100) / 100;
-        gcode.push("M3S0");
+        if (laser == 1) {
+          gcode.push("M3S0");
+        }
         if (xStr != lastXstr && yStr != lastYstr) {
           gcode.push("G0X" + xStr + "Y" + yStr);
           lastXstr = xStr;
@@ -56,7 +61,12 @@ Snap.plugin(function (Snap, Element, Paper, global) {
           gcode.push("G0Y" + yStr);
           lastYstr = yStr;
         }
+        if (feedrateSet == 0) {
+          gcode.push("G1F" + laserSpeed);
+          feedrateSet = 1;
+        }
         gcode.push("M3S" + laserIntensity);
+        laser = 1
         if (pierceTime != 0) {
           gcode.push("G4P" + pierceTime);
         }
@@ -137,6 +147,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
         }
       }
     }
+    gcode.push("M3S0\n")
     //console.log(gcode.join("\n").length)
     return gcode.join("\n");
   }
