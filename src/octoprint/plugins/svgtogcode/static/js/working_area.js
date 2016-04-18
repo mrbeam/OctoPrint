@@ -1,5 +1,20 @@
 $(function(){
 
+	// Opera 8.0+
+	var isOpera = (!!window.opr && !!opr.addons) || !!window.opera || navigator.userAgent.indexOf(' OPR/') >= 0;
+	// Firefox 1.0+
+	var isFirefox = typeof InstallTrigger !== 'undefined';
+	// At least Safari 3+: "[object HTMLElementConstructor]"
+	var isSafari = Object.prototype.toString.call(window.HTMLElement).indexOf('Constructor') > 0;
+	// Internet Explorer 6-11
+	var isIE = /*@cc_on!@*/false || !!document.documentMode;
+	// Edge 20+
+	var isEdge = !isIE && !!window.StyleMedia;
+	// Chrome 1+
+	var isChrome = !!window.chrome && !!window.chrome.webstore;
+	// Blink engine detection
+	var isBlink = (isChrome || isOpera) && !!window.CSS;
+
 	function WorkingAreaViewModel(params) {
 		var self = this;
 
@@ -102,24 +117,33 @@ $(function(){
 			self.availableWidth($('#workingarea div.span8').innerWidth());
 		};
 
-		self.move_laser = function(el){
+		self.move_laser = function(data, evt){
 			self.abortFreeTransforms();
 			if(self.state.isOperational() && !self.state.isPrinting()){
-				var x = self.px2mm(event.offsetX);
-				var y = self.px2mm(event.toElement.ownerSVGElement.offsetHeight - event.offsetY); // hopefully this works across browsers
-				x = Math.min(x, self.workingAreaWidthMM());
-				y = Math.min(y, self.workingAreaHeightMM());
+				var coord = self.getXYCoord(evt);
 				$.ajax({
 					url: API_BASEURL + "printer/printhead",
 					type: "POST",
 					dataType: "json",
 					contentType: "application/json; charset=UTF8",
-					data: JSON.stringify({"command": "position", x:x, y:y})
+					data: JSON.stringify({"command": "position", x:coord.x, y:coord.y})
 				});
 			}
 		};
 
-
+		self.getXYCoord = function(evt){
+			if(isFirefox) {
+				var scale = evt.target.parentElement.transform.baseVal[0].matrix.a;
+				var x = self.px2mm(evt.offsetX) * scale;
+				var y = self.px2mm(parseFloat(evt.target.attributes.height.value) - evt.offsetY) * scale;
+			} else {
+				var x = self.px2mm(evt.offsetX);
+				var y = self.px2mm(evt.target.ownerSVGElement.getBoundingClientRect().height - evt.offsetY); // hopefully this works across browsers
+			}
+			x = Math.min(x, self.workingAreaWidthMM());
+			y = Math.min(y, self.workingAreaHeightMM());
+			return {x:x, y:y};
+		}
 
 		self.crosshairX = function(){
 			var pos = self.state.currentPos();
@@ -127,7 +151,7 @@ $(function(){
 
 		};
 		self.crosshairY = function(){
-			var h = document.getElementById('area_preview').clientHeight;
+			var h = Snap($('#area_preview')[0]).getBBox().height;
 			var pos = self.state.currentPos();
 			return pos !== undefined ? (h - self.mm2px(pos.y)  - 15) : -100; // subtract height/2;
 		};
