@@ -344,7 +344,7 @@ class SvgToGcodePlugin(octoprint.plugin.SlicerPlugin,
 		if not machinecode_path:
 			path, _ = os.path.splitext(model_path)
 			machinecode_path = path + ".gco"
-		
+
 		self._svgtogcode_logger.info("### Slicing %s to %s using profile stored at %s" % (model_path, machinecode_path, profile_path))
 
 		## direct call
@@ -357,6 +357,8 @@ class SvgToGcodePlugin(octoprint.plugin.SlicerPlugin,
 			converter_path = '/home/teja/workspace/mrbeam-inkscape-ext'
 		elif("denkbrett" in hostname):
 			converter_path = '/home/flo/mrbeam/git/mrbeam-inkscape-ext'
+		elif ("clems-Air" in hostname):
+			converter_path = '/Users/clem/Dropbox/mrBeam/mrbeam-inkscape-ext'
 
 		import sys
 		sys.path.append(converter_path)
