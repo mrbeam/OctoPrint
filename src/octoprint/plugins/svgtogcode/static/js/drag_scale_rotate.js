@@ -82,7 +82,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 			handleLength: 18,
 			handleRadius: 16,
 			unscale: 1,
-			handleStrokeDash: "5,5",
+			handleStrokeDash: "5,5"
 		};
 
 		Element.prototype.ftToggleHandles = function(){
@@ -215,8 +215,9 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 
 			// transformed bbox
 			this.data("bbT", this.paper.rect( rectObjFromBB( this.getBBox(1) ) )
-							.attr({ fill: "none", stroke: ftOption.handleFill, strokeWidth: ftOption.handleStrokeWidth, strokeDasharray: ftOption.handleStrokeDashPreset.join(',') })
-							.transform( this.transform().global.toString() ) );
+				.attr({ fill: "none", 'vector-effect': "non-scaling-stroke", stroke: ftOption.handleFill, strokeWidth:  ftOption.handleStrokeWidth, strokeDasharray: ftOption.handleStrokeDashPreset.join(',') })
+				.transform( this.transform().global.toString() ) );
+
 			// outer bbox
 			this.data("bb", this.paper.select('#userContent').rect( rectObjFromBB( this.getBBox() ) )
 							.attr({ fill: "none", stroke: 'gray', strokeWidth: ftOption.handleStrokeWidth, strokeDasharray: ftOption.handleStrokeDash }) );
@@ -338,7 +339,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 			}
 			mainEl.data("angle", angle );
 		}
-		
+
 		mainEl.ftUpdateTransform();
 		mainEl.ftDrawJoinLine( handle );
 	};
