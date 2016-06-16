@@ -284,12 +284,12 @@ $(function(){
 				newSvg.transformable();
 				newSvg.ftRegisterCallback(self.svgTransformUpdate);
 
-				file.id = id; // list entry id
-				file.previewId = previewId;
-				file.url = url;
-				file.misfit = "";
-
-				self.placedDesigns.push(file);
+				var fileCopy = $.extend(true,{},file);
+				fileCopy.id = id; // list entry id
+				fileCopy.previewId = previewId;
+				fileCopy.url = url;
+				fileCopy.misfit = "";
+				self.placedDesigns.push(fileCopy);
 			};
 			self.loadSVG(url, callback);
 		};
@@ -438,11 +438,13 @@ $(function(){
 				newImg.transformable();
 				//newImg.ftDisableRotate();
 				newImg.ftRegisterCallback(self.svgTransformUpdate);
-				file.id = id;
-				file.previewId = previewId;
-				file.url = url;
-				file.subtype = "bitmap";
-				self.placedDesigns.push(file);
+
+				var fileCopy = $.extend(true,{},file);
+				fileCopy.id = id;
+				fileCopy.previewId = previewId;
+				fileCopy.url = url;
+				fileCopy.subtype = "bitmap";
+				self.placedDesigns.push(fileCopy);
 			};
 			img.src = url;
 		};

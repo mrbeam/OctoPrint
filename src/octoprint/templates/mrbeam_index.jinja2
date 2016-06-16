@@ -160,7 +160,7 @@
 												-->
 												{{ _('Approx. Total Job Time') }}: <strong data-bind="text: estimatedPrintTimeString"></strong><br>
 												<div data-bind="visible: isPrinting() || isPaused()">
-													
+
 													<div class="progress">
 														<div class="bar" id="job_progressBar" data-bind="style: { width: progressString() + '%' }">&nbsp;{{ _('Processed') }} :  <strong data-bind="text: byteString"></strong></div>
 													</div>
@@ -183,7 +183,7 @@
 															</button>
 														</div>
 														<span>Passes</span>
-														
+
 													</div>
 
 												</div>
@@ -533,7 +533,7 @@
 												<i class="icon-camera icon-white"></i>
 												<span>{{ _('Photo') }}</span>
 											</a>
-												
+
 										</div>
 										<div id="gcode_upload_progress" class="progress" style="width: 100%;">
 											<div class="bar" style="width: 0%"></div>
@@ -601,7 +601,7 @@
 															<div class="btn-group action-buttons">
 <!--																<a class="btn btn-mini" data-bind="attr: {href: $root.downloadLink($data), css: {disabled: !$root.downloadLink($data)}}"><i class="icon-download-alt" title="{{ _('Download') }}"></i></a>
 																<div class="btn btn-mini" data-bind="click: function() { if ($root.enableRemove($data)) { $root.removeFile($data); } else { return; } }, css: {disabled: !$root.enableRemove($data)}"><i class="icon-trash" title="{{ _('Remove') }}"></i></div>-->
-																<div class="btn" data-bind="click: function() { if(!$root.workingArea.isPlaced($data)){ $root.workingArea.placeSVG($data); } }, css: {disabled: $root.workingArea.isPlaced($data)}"><i class="icon-ok" title="{{ _('Use') }}">Add</i></div>
+																<div class="btn" data-bind="click: function() { $root.workingArea.placeSVG($data); }"><i class="icon-ok" title="{{ _('Use') }}">Add</i></div>
 															</div>
 														</div>
 													</script>
@@ -628,7 +628,7 @@
 															<div class="btn-group action-buttons">
 <!--																<a class="btn btn-mini" data-bind="attr: {href: $root.downloadLink($data), css: {disabled: !$root.downloadLink($data)}}"><i class="icon-download-alt" title="{{ _('Download') }}"></i></a>
 																<div class="btn btn-mini" data-bind="click: function() { if ($root.enableRemove($data)) { $root.removeFile($data); } else { return; } }, css: {disabled: !$root.enableRemove($data)}"><i class="icon-trash" title="{{ _('Remove') }}"></i></div>-->
-																<div class="btn" data-bind="click: function() { if(!$root.workingArea.isPlaced($data)){ $root.workingArea.placeIMG($data); } }, css: {disabled: $root.workingArea.isPlaced($data)}"><i class="icon-ok" title="{{ _('Use') }}">Add</i></div>
+																<div class="btn" data-bind="click: function() { $root.workingArea.placeIMG($data);}"><i class="icon-ok" title="{{ _('Use') }}">Add</i></div>
 															</div>
 														</div>
 													</script>
