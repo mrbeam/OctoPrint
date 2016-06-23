@@ -302,15 +302,6 @@ $(function(){
 			self.abortFreeTransforms();
 			snap.selectAll('#'+file.previewId).remove();
 			self.placedDesigns.remove(file);
-			// TODO debug why remove always clears all items of this type.
-//			self.placedDesigns.remove(function(item){
-//				console.log("item", item.previewId );
-//				//return false;
-//				if(item.previewId === file.previewId){
-//					console.log("match", item.previewId );
-//					return true;
-//				} else return false;
-//			});
 		};
 		self.fitSVG = function(file){
 			self.abortFreeTransforms();
@@ -345,10 +336,10 @@ $(function(){
 			var vertical = self.px2mm((bbox.y2 - bbox.y) * globalScale);
 			var id = svg.attr('id');
 			var label_id = id.substr(0, id.indexOf('-'));
-			$('#'+label_id+' .translation').text(tx.toFixed(1) + ',' + ty.toFixed(1));
-			$('#'+label_id+' .horizontal').text(horizontal.toFixed() + 'mm');
-			$('#'+label_id+' .vertical').text(vertical.toFixed() + 'mm');
-			$('#'+label_id+' .rotation').text(rot.toFixed(1) + '°');
+			$('#'+id+' .translation').text(tx.toFixed(1) + ',' + ty.toFixed(1));
+			$('#'+id+' .horizontal').text(horizontal.toFixed() + 'mm');
+			$('#'+id+' .vertical').text(vertical.toFixed() + 'mm');
+			$('#'+id+' .rotation').text(rot.toFixed(1) + '°');
 		};
 
 

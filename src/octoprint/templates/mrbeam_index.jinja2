@@ -221,7 +221,7 @@
 									<div class="accordion-body collapse in overflow_visible" id="wa_filelist">
 										<div class="accordion-inner">
 											<div class="gcode_files" data-bind="slimScrolledForeach: placedDesigns">
-												<div class="entry" data-bind="attr: { id: $data.id }, template: { name: $root.templateFor($data), data: $data }"></div>
+												<div class="entry" data-bind="attr: { id: $data.previewId }, template: { name: $root.templateFor($data), data: $data }"></div>
 											</div>
 
 											<script type="text/html" id="wa_template_machinecode">
