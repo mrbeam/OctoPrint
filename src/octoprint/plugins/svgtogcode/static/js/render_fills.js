@@ -1,7 +1,7 @@
 //    render_fills.js - a snapsvg.io plugin to render the infill of svg files into a bitmap.
 //    Copyright (C) 2015  Teja Philipp <osd@tejaphilipp.de>
-//    
-//    based on work by http://davidwalsh.name/convert-canvas-image 
+//
+//    based on work by http://davidwalsh.name/convert-canvas-image
 //    and http://getcontext.net/read/svg-images-on-a-html5-canvas
 //
 //    This program is free software: you can redistribute it and/or modify
@@ -20,12 +20,12 @@
 
 
 Snap.plugin(function (Snap, Element, Paper, global) {
-	
 
-	
+
+
 	/**
 	 * @param {elem} elem start point
-	 * 
+	 *
 	 * @returns {path}
 	 */
 
@@ -34,7 +34,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 		var selection = [];
 		var children = elem.children();
 
-		
+
 		if (children.length > 0) {
 			var goRecursive = (elem.type !== "defs" && // ignore these tags
 				elem.type !== "clipPath" &&
@@ -42,7 +42,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 				elem.type !== "rdf:rdf" &&
 				elem.type !== "cc:work" &&
 				elem.type !== "sodipodi:namedview");
-		
+
 			if(goRecursive) {
 				for (var i = 0; i < children.length; i++) {
 					var child = children[i];
@@ -50,7 +50,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 				}
 			}
 		} else {
-			if(elem.type === 'image'){
+			if(elem.type === 'image' || elem.type === "text" || elem.type === "#text"){
 				selection.push(elem);
 			} else {
 				if(fillPaths && elem.is_filled()){
@@ -65,7 +65,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 
 	Element.prototype.is_filled = function(){
 		var elem = this;
-		
+
 		// TODO text support
 		// TODO opacity support
 		if (elem.type !== "circle" &&
@@ -74,14 +74,17 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 			elem.type !== "line" &&
 			elem.type !== "polygon" &&
 			elem.type !== "polyline" &&
-			elem.type !== "path" ){
-			
+			elem.type !== "path" //&&
+			// elem.type !== "text" &&
+			// elem.type !== "#text"
+		){
+
 			return false;
 		}
-		
+
 		var fill = elem.attr('fill');
 		var opacity = elem.attr('fill-opacity');
-		
+
 		if(fill !== 'none'){
 			if(opacity === null || opacity > 0){
 				return true;
@@ -89,7 +92,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 		}
 		return false;
 	};
-	
+
 	Element.prototype.embedImage = function(callback){
 		var elem = this;
 		if(elem.type !== 'image') return;
@@ -113,15 +116,15 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 		};
 
 		image.src = url;
-	
+
 	};
-	
+
 	Element.prototype.renderPNG = function (wMM, hMM, pxPerMM, callback) {
 		var elem = this;
 
 		// get svg as dataUrl
 		var svgStr = elem.outerSVG();
-		var svgDataUri = 'data:image/svg+xml;base64,' + window.btoa(svgStr);
+		var svgDataUri = 'data:image/svg+xml;base64,' + window.btoa(unescape(encodeURIComponent(svgStr))); //deprecated unescape needed!
 		var source = new Image();
 		source.src = svgDataUri;
 
@@ -129,7 +132,7 @@ Snap.plugin(function (Snap, Element, Paper, global) {
 		var renderCanvas = document.createElement('canvas');
 		renderCanvas.id = "renderCanvas";
 		renderCanvas.width = wMM * pxPerMM;
-		renderCanvas.height = hMM * pxPerMM;	
+		renderCanvas.height = hMM * pxPerMM;
 		document.getElementsByTagName('body')[0].appendChild(renderCanvas);
 		var renderCanvasContext = renderCanvas.getContext('2d');
 

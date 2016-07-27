@@ -331,7 +331,7 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 	def position(self, x, y):
 		printer_profile = self._printerProfileManager.get_current_or_default()
 		movement_speed = min(printer_profile["axes"]["x"]["speed"], printer_profile["axes"]["y"]["speed"])
-		self.commands(["G90", "G0 X%.3f Y%.3f F%d" % (x, y, movement_speed), "?"])
+		self.commands(["G90", "G0 X%.3f Y%.3f F%d" % (x, y, movement_speed)])
 
 	def _convert_rate_value(self, factor, min=0, max=200):
 		if not isinstance(factor, (int, float, long)):

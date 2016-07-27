@@ -16,7 +16,7 @@ defaults = dict(
 	# general settings
 	svgDPI = 90,
 	pierce_time = 0,
-	
+
 	# vector settings
 	speed = 300,
 	intensity = 500,
@@ -24,7 +24,7 @@ defaults = dict(
 	cross_fill = False,
 	fill_angle = 0,
 	fill_spacing = 0.25,
-	
+
 	# pixel settings
 	beam_diameter = 0.25,
 	intensity_white = 0,
@@ -251,8 +251,8 @@ class Profile(object):
 		}
 
 		return settings
-	
-	
+
+
 	def convert_to_engine2(self):
 
 		settings = {

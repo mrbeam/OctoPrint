@@ -107,6 +107,7 @@ $(function(){
 		self.clear = function(){
 			snap.selectAll('#userContent>*').remove();
 			snap.selectAll('#placedGcodes>*').remove();
+			snap.selectAll('rect:not(#coordGrid)').remove();
 			self.placedDesigns([]);
 		};
 
@@ -132,14 +133,9 @@ $(function(){
 		};
 
 		self.getXYCoord = function(evt){
-			if(isFirefox) {
-				var scale = evt.target.parentElement.transform.baseVal[0].matrix.a;
-				var x = self.px2mm(evt.offsetX) * scale;
-				var y = self.px2mm(parseFloat(evt.target.attributes.height.value) - evt.offsetY) * scale;
-			} else {
-				var x = self.px2mm(evt.offsetX);
-				var y = self.px2mm(evt.target.ownerSVGElement.getBoundingClientRect().height - evt.offsetY); // hopefully this works across browsers
-			}
+			var scale = evt.target.parentElement.transform.baseVal[0].matrix.a;
+			var x = self.px2mm(evt.offsetX) * scale;
+			var y = self.px2mm(parseFloat(evt.target.attributes.height.value) - evt.offsetY) * scale;
 			x = Math.min(x, self.workingAreaWidthMM());
 			y = Math.min(y, self.workingAreaHeightMM());
 			return {x:x, y:y};
@@ -241,10 +237,25 @@ $(function(){
 			var url = self._getSVGserveUrl(file);
 			callback = function (f) {
 				var newSvgAttrs = {};
-				var root_attrs = f.select('svg').node.attributes;
+				if(f.select('svg') == null){
+					root_attrs = f.node.attributes;
+				} else {
+					var root_attrs = f.select('svg').node.attributes;
+				}
 				var doc_width = null;
 				var doc_height = null;
 				var doc_viewbox = null;
+
+				// find clippath elements
+				var clipPathEl = f.selectAll('clipPath');
+				if(clipPathEl.length != 0){
+					console.warn("Warning: removed unsupported clipPath element in SVG");
+					self.svg_contains_clipPath_warning();
+					clipPathEl.remove()
+				}
+
+				// find all elements with "display=none" and remove them
+				f.selectAll("[display=none]").remove()
 
 				// iterate svg tag attributes
 				for(var i = 0; i < root_attrs.length; i++){
@@ -261,9 +272,19 @@ $(function(){
 					}
 				}
 
+				// find Illustrator comment and notify
+				f.node.childNodes.forEach(function(entry) {
+					if(entry.nodeType == 8) { // Nodetype 8 = comment
+						if(entry.textContent.indexOf('Illustrator') > -1) {
+							new PNotify({title: gettext("Illustrator SVG Detected"), text: "Illustrator SVG detected! To preserve coorect scale, please go to the \'Settings\' menu and change the \'SVG dpi\' field under \'Plugins/Svg Conversion\' according to your file. And add it again.", type: "info", hide: false});
+						}
+					}
+				});
+
 				// scale matrix
 				var mat = self.getDocumentViewBoxMatrix(doc_width, doc_height, doc_viewbox);
-				var scaleMatrixStr = new Snap.Matrix(mat[0][0],mat[0][1],mat[1][0],mat[1][1],mat[0][2],mat[1][2]).toTransformString();
+				var dpiscale = 90 / self.settings.settings.plugins.svgtogcode.svgDPI();
+				var scaleMatrixStr = new Snap.Matrix(mat[0][0],mat[0][1],mat[1][0],mat[1][1],mat[0][2],mat[1][2]).scale(dpiscale).toTransformString();
 				newSvgAttrs['transform'] = scaleMatrixStr;
 
 				var newSvg = snap.group(f.selectAll("svg>*"));
@@ -389,8 +410,20 @@ $(function(){
 			};
 		};
 
+
+		self.svg_contains_clipPath_warning = function(){
+            var error = "<p>" + gettext("The SVG file contains clipPath elements.<br/>clipPath is not supported yet and has been removed from file.") + "</p>";
+            //error += pnotifyAdditionalInfo("<pre>" + data.jqXHR.responseText + "</pre>");
+            new PNotify({
+                title: "clipPath elements removed",
+                text: error,
+                type: "warn",
+                hide: false
+            });
+		};
+
 		self.svg_contains_text_warning = function(svg){
-            var error = "<p>" + gettext("The svg file contains text elements.<br/>Please convert them to paths.<br/>Otherwise they will be ignored.") + "</p>";
+            var error = "<p>" + gettext("The SVG file contains text elements.<br/>If you want to laser just their outlines,<br/>please convert them to paths.<br/>Otherwise they will be engraved with infill.") + "</p>";
             //error += pnotifyAdditionalInfo("<pre>" + data.jqXHR.responseText + "</pre>");
             new PNotify({
                 title: "Text elements found",
@@ -398,7 +431,6 @@ $(function(){
                 type: "warn",
                 hide: false
             });
-			svg.selectAll('text,tspan').remove();
 		};
 
 		self.svg_misfitting_warning = function(svg, misfitting){
@@ -704,6 +736,16 @@ $(function(){
 			return snap.selectAll("#userContent image");
 		};
 
+		self.hasTextItems = function () {
+			if(snap.selectAll("#userContent tspan").length > 0 ||
+				snap.selectAll("#userContent text").length > 0 ||
+				snap.selectAll("userContent #text").length > 0) {
+				return true
+			}else{
+				return false
+			}
+		};
+
 		self.getPlacedGcodes = ko.computed(function() {
 			var gcodeFiles = [];
 			ko.utils.arrayForEach(self.placedDesigns(), function(design) {
@@ -826,7 +868,7 @@ $(function(){
 				for (var i = 0; i < fillings.length; i++) {
 					var item = fillings[i];
 
-					if (item.type === 'image') {
+					if (item.type === 'image' || item.type === "text" || item.type === "#text") {
 						// remove filter effects on images for proper rendering
 						var style = item.attr('style');
 						if (style !== null) {

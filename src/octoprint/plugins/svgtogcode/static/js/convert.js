@@ -41,8 +41,10 @@ $(function(){
 		// image engraving stuff
 		// preset values are a good start for wood engraving
 		self.images_placed = ko.observable(false);
+		self.text_placed = ko.observable(false);
 		self.show_image_parameters = ko.computed(function(){
-			return self.images_placed() || (self.fill_areas() && self.show_vector_parameters());
+			return (self.images_placed() || self.text_placed()
+				|| (self.fill_areas() && self.show_vector_parameters()));
 		});
 		self.imgIntensityWhite = ko.observable(0);
 		self.imgIntensityBlack = ko.observable(500);
@@ -85,6 +87,7 @@ $(function(){
 			self.show_vector_parameters(self.workingArea.getPlacedSvgs().length > 0);
 			self.show_fill_areas_checkbox(self.workingArea.hasFilledVectors())
 			self.images_placed(self.workingArea.getPlacedImages().length > 0);
+			self.text_placed(self.workingArea.hasTextItems());
 			//self.show_image_parameters(self.workingArea.getPlacedImages().length > 0);
 
 			if(self.show_vector_parameters() || self.show_image_parameters()){

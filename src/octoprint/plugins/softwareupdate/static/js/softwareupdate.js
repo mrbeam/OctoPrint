@@ -158,7 +158,7 @@ $(function() {
                 text += "<small>" + gettext("Those components marked with <i class=\"icon-ok\"></i> can be updated directly.") + "</small>";
 
                 var options = {
-                    title: gettext("Update Available"),
+                    title: gettext("Mr Beam Update Available"),
                     text: text,
                     hide: false
                 };

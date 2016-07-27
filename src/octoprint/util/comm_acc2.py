@@ -88,7 +88,7 @@ class MachineCom(object):
 		self._finished_passes = 0
 
 		# regular expressions
-		self._regex_command = re.compile("^\s*\$?([GM]\d+|[TH])")
+		self._regex_command = re.compile("^\s*\$?([GM]\d+|[THX])")
 		self._regex_feedrate = re.compile("F\d+", re.IGNORECASE)
 		self._regex_intensity = re.compile("S\d+", re.IGNORECASE)
 
@@ -147,7 +147,7 @@ class MachineCom(object):
 				elif line.startswith('['): # feedback message
 					self._handle_feedback_message(line)
 				elif line.startswith('Grb'): # Grbl startup message
-					self._handle_startup_message()
+					self._handle_startup_message(line)
 			except:
 				self._logger.exception("Something crashed inside the monitoring loop, please report this to Mr. Beam")
 				errorMsg = "See octoprint.log for details"
@@ -406,7 +406,7 @@ class MachineCom(object):
 		elif line[1:].startswith('Dis'): # [Disabled]
 			pass
 
-	def _handle_startup_message(self):
+	def _handle_startup_message(self, line):
 		if self.isOperational():
 			errorMsg = "Machine reset."
 			self._cmd = None
@@ -421,7 +421,14 @@ class MachineCom(object):
 			self._changeState(self.STATE_LOCKED)
 			eventManager().fire(Events.ERROR, {"error": self.getErrorString()})
 		else:
-			self._onConnected(self.STATE_LOCKED)
+			versionMatch = re.search("Grbl (?P<grbl>.+?)(_(?P<git>[0-9a-f]{7})(?P<dirty>-dirty)?)? \[.+\]", line)
+			if versionMatch:
+				versionDict = versionMatch.groupdict()
+				self._writeGrblVersionToFile(versionDict)
+				if self._compareGrblVersion(versionDict) is False:
+					self._flashGrbl()
+				else:
+					self._onConnected(self.STATE_LOCKED)
 
 	def _update_grbl_pos(self, line):
 		# line example:
@@ -617,7 +624,7 @@ class MachineCom(object):
 		params = ["avrdude", "-patmega328p", "-carduino", "-b" + str(self._baudrate), "-P" + str(self._port), "-D", "-Uflash:w:" + pathToGrblHex]
 		rc = subprocesscall(params)
 
-		if rc is False:
+		if rc == 0:
 			self._log("successfully flashed new grbl version")
 			self._openSerial()
 			self._changeState(self.STATE_CONNECTING)
@@ -752,6 +759,10 @@ class MachineCom(object):
 
 	def _gcode_H_sent(self, cmd, cmd_type=None):
 		self._changeState(self.STATE_HOMING)
+		return cmd
+
+	def _gcode_X_sent(self, cmd, cmd_type=None):
+		self._changeState(self.STATE_HOMING) # TODO: maybe change to seperate $X mode
 		return cmd
 
 	def _gcode_Hold_sent(self, cmd, cmd_type=None):
@@ -1164,6 +1175,9 @@ class PrintingGcodeFileInformation(PrintingFileInformation):
 
 		if not os.path.exists(self._filename) or not os.path.isfile(self._filename):
 			raise IOError("File %s does not exist" % self._filename)
+
+		self._stripCommments()
+
 		self._size = os.stat(self._filename).st_size
 		self._pos = 0
 
@@ -1216,6 +1230,16 @@ class PrintingGcodeFileInformation(PrintingFileInformation):
 			self.close()
 			self._logger.exception("Exception while processing line")
 			raise e
+
+	def _stripCommments(self):
+		dir     = os.path.dirname(os.path.abspath(self._filename))
+		tmpfile = open(dir + '/gcode.tmp', 'w')
+		with open(self._filename, "r") as fileobject:
+			for line in fileobject:
+				if process_gcode_line(line) is not None:
+					tmpfile.write(line)
+		tmpfile.close()
+		self._filename = dir + '/gcode.tmp'
 
 def convert_pause_triggers(configured_triggers):
 	triggers = {
@@ -1281,6 +1305,7 @@ def serialList():
 	baselist = baselist \
 				+ glob.glob("/dev/ttyUSB*") \
 				+ glob.glob("/dev/ttyACM*") \
+				+ glob.glob("/dev/ttyAMA*") \
 				+ glob.glob("/dev/tty.usb*") \
 				+ glob.glob("/dev/cu.*") \
 				+ glob.glob("/dev/cuaU*") \

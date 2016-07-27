@@ -568,8 +568,8 @@ msgstr ""
 "aktualisiert werden."
 
 #: src/octoprint/plugins/softwareupdate/static/js/softwareupdate.js:131
-msgid "Update Available"
-msgstr "Aktualisierung verfügbar"
+msgid "Mr Beam Update Available"
+msgstr "Mr Beam Aktualisierung verfügbar"
 
 #: src/octoprint/plugins/softwareupdate/static/js/softwareupdate.js:143
 msgid "Ignore"

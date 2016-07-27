@@ -18,7 +18,7 @@
 					</div>
 					<div class="controls alert alert-info hint" data-bind="visible: showHints">
 						<span class="icon icon-question-sign" aria-hidden="true"></span>
-						Sets the intensity of the laser. The more intensity the deeper the effect on the material. 
+						Sets the intensity of the laser. The more intensity the deeper the effect on the material.
 						Cutting needs higher intensities than engraving.
 						The effect in general is dependent from the material and its color and surface.
 					</div>
@@ -33,8 +33,8 @@
 					</div>
 					<div class="controls alert alert-info hint" data-bind="visible: showHints">
 						<span class="icon icon-question-sign" aria-hidden="true"></span>
-						Sets the velocity of the laser head. The slower the movement the deeper the effect on the material. 
-						Cutting needs slower movement than engraving. 
+						Sets the velocity of the laser head. The slower the movement the deeper the effect on the material.
+						Cutting needs slower movement than engraving.
 						The effect in general is dependent from the material and its color and surface.
 					</div>
 				</div>
@@ -56,11 +56,11 @@
 				<div class="controls alert alert-info hint" data-bind="visible: showHints">
 					<span class="icon icon-question-sign" aria-hidden="true"></span>
 					Some (especially bright) materials require the laser to dwell a little until the surface has absorbed enough energy to be affected.
-					This parameter sets the amount of time in milliseconds the movement is paused after the laser is switched on. 
+					This parameter sets the amount of time in milliseconds the movement is paused after the laser is switched on.
 					If the result shows gaps in lines for example increase this value carefully. The higher the value the higher the risk of material ignition.
 				</div>
 			</div>
-			
+
 			<div data-bind="visible: show_image_parameters ">
 				<p>{{ _('Image engraving parameters:') }}</p>
 				<div class="control-group" >
@@ -103,10 +103,10 @@
 					<div class="controls alert alert-info hint" data-bind="visible: showHints">
 						<span class="icon icon-question-sign" aria-hidden="true"></span>
 						Pixel / raster engravings are done line by line. This sets the distance between the single lines.
-						Smaller values allow finer engravings but require a more precise focus and are slower. 
+						Smaller values allow finer engravings but require a more precise focus and are slower.
 					</div>
 
-					
+
 					<p >{{ _('Image Preprocessing') }}</p>
 					<div class="controls">
 						<div class="img_preprocessing_preview before" style="background-image:url(/plugin/svgtogcode/static/img/kitty_grayscale.png);" >before</div>
@@ -114,22 +114,22 @@
 							<div class="img_preprocessing_preview contrast" style="background-image:url(/plugin/svgtogcode/static/img/kitty_contrast.png);" data-bind="style: { opacity: contrastPreview }" ></div>
 							<div class="img_preprocessing_preview sharpened" style="background-image:url(/plugin/svgtogcode/static/img/kitty_sharpened.png);" data-bind="style: { opacity: sharpenedPreview }" ></div>
 							<div class="img_preprocessing_preview dithered" style="background-image:url(/plugin/svgtogcode/static/img/kitty_dithered_150.png);" data-bind="visible: imgDithering"></div>
-						
+
 						</div>
 						<div class="photo_attribution"><a href="http://www.christianholmer.com" target="_blank">Photo: Christian Holmér</a></div>
 					</div>
-					
+
 					<div data-bind="disable:imgDithering ">
 						<label class="control-label">{{ _('Contrast') }}</label>
 						<div class="controls img_slider">
 							<input id="svgtogcode_contrast_slider" type="text" data-bind="value: imgContrast" >
 						</div>
-						<div style="clear:both"></div>	
+						<div style="clear:both"></div>
 						<div class="controls alert alert-info hint" data-bind="visible: showHints">
 							<span class="icon icon-question-sign" aria-hidden="true"></span>
-							Increases the image contrast before converting to gcode.  
+							Increases the image contrast before converting to gcode.
 						</div>
-						
+
 						<label class="control-label">{{ _('Sharpening') }}</label>
 						<div class="controls img_slider">
 							<input id="svgtogcode_sharpening_slider" class="uninitialized" type="text" data-bind="value: imgSharpening">
@@ -137,10 +137,10 @@
 						<div style="clear:both"></div>
 						<div class="controls alert alert-info hint" data-bind="visible: showHints">
 							<span class="icon icon-question-sign" aria-hidden="true"></span>
-							Sharpens the image before converting to gcode.  
+							Sharpens the image before converting to gcode.
 						</div>
 					</div>
-						
+
 					<label class="control-label">{{ _('Dithering') }}</label>
 					<div class="controls">
 						<label class="checkbox">
@@ -149,8 +149,8 @@
 					</div>
 					<div class="controls alert alert-info hint" data-bind="visible: showHints">
 						<span class="icon icon-question-sign" aria-hidden="true"></span>
-						Converts the image to solely black and white pixels. 
-						Use this if the laser effect on your material is not able to transfer grayscales.  
+						Converts the image to solely black and white pixels.
+						Use this if the laser effect on your material is not able to transfer grayscales.
 					</div>
 
 				</div>
