@@ -273,7 +273,7 @@ $(function(){
 				}
 
 				// find Illustrator comment and notify
-				f.node.childNodes.forEach(function(entry) {
+				Array.from(f.node.childNodes).forEach(function(entry) {
 					if(entry.nodeType == 8) { // Nodetype 8 = comment
 						if(entry.textContent.indexOf('Illustrator') > -1) {
 							new PNotify({title: gettext("Illustrator SVG Detected"), text: "Illustrator SVG detected! To preserve coorect scale, please go to the \'Settings\' menu and change the \'SVG dpi\' field under \'Plugins/Svg Conversion\' according to your file. And add it again.", type: "info", hide: false});
