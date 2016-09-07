@@ -559,7 +559,7 @@ class MachineCom(object):
 		eventManager().fire(Events.CONNECTED, payload)
 
 	def _onHomingDone(self):
-		self.sendCommand("G92X500Y0Z0")
+		self.sendCommand("G92X510Y400Z0")
 		self.sendCommand("G90")
 		self.sendCommand("G21")
 
