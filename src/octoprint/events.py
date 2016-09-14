@@ -78,6 +78,7 @@ class Events(object):
 	EJECT = "Eject"
 	E_STOP = "EStop"
 	REGISTERED_MESSAGE_RECEIVED = "RegisteredMessageReceived"
+	LIMITS_HIT = "Limits Hit"
 
 	# Timelapse
 	CAPTURE_START = "CaptureStart"
