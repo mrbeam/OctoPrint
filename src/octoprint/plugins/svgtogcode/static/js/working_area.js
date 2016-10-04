@@ -133,9 +133,15 @@ $(function(){
 		};
 
 		self.getXYCoord = function(evt){
-			var scale = evt.target.parentElement.transform.baseVal[0].matrix.a;
-			var x = self.px2mm(evt.offsetX) * scale;
-			var y = self.px2mm(parseFloat(evt.target.attributes.height.value) - evt.offsetY) * scale;
+			if(/firefox/.test(navigator.userAgent.toLowerCase())) {
+				var scale = evt.target.parentElement.transform.baseVal[0].matrix.a;
+				var x = self.px2mm(evt.offsetX) * scale;
+				var y = self.px2mm(parseFloat(evt.target.attributes.height.value) - evt.offsetY) * scale;
+			} else
+			{
+				var x = self.px2mm(evt.offsetX);
+				var y = self.px2mm(parseFloat(evt.target.farthestViewportElement.clientHeight) - evt.offsetY);
+			}
 			x = Math.min(x, self.workingAreaWidthMM());
 			y = Math.min(y, self.workingAreaHeightMM());
 			return {x:x, y:y};
