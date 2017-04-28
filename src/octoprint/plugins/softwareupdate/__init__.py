@@ -827,7 +827,7 @@ class SoftwareUpdatePlugin(octoprint.plugin.BlueprintPlugin,
 			self._settings.load()
 
 			# persist the new version if necessary for check type
-			if check["type"] == "github_commit":
+			if check["type"] in ["github_commit", "bitbucket_commit"]:
 				dummy_default = dict(plugins=dict())
 				dummy_default["plugins"][self._identifier] = dict(checks=dict())
 				dummy_default["plugins"][self._identifier]["checks"][target] = dict(current=None)
@@ -884,7 +884,7 @@ class SoftwareUpdatePlugin(octoprint.plugin.BlueprintPlugin,
 				release_branches += [x["branch"] for x in check["prerelease_branches"]]
 			result["released_version"] = not release_branches or BRANCH in release_branches
 
-			if check["type"] == "github_commit":
+			if check["type"] in ["github_commit", "bitbucket_commit"]:
 				result["current"] = REVISION if REVISION else "unknown"
 			else:
 				result["current"] = VERSION
@@ -938,7 +938,7 @@ class SoftwareUpdatePlugin(octoprint.plugin.BlueprintPlugin,
 				# displayVersion AND current missing or None
 				result["displayVersion"] = u"unknown"
 
-			if check["type"] in ("github_commit",):
+			if check["type"] in ["github_commit", "bitbucket_commit"]:
 				result["current"] = check.get("current", None)
 			else:
 				result["current"] = check.get("current", check.get("displayVersion", None))
@@ -974,6 +974,8 @@ class SoftwareUpdatePlugin(octoprint.plugin.BlueprintPlugin,
 			return version_checks.github_release
 		elif check_type == "github_commit":
 			return version_checks.github_commit
+		elif check_type == "bitbucket_commit":
+			return version_checks.bitbucket_commit
 		elif check_type == "git_commit":
 			return version_checks.git_commit
 		elif check_type == "commandline":
