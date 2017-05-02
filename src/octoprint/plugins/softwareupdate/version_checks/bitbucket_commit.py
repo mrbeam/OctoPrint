@@ -10,7 +10,7 @@ import logging
 
 from ..exceptions import ConfigurationInvalid
 
-BRANCH_HEAD_URL = "https://api.bitbucket.org/2.0/repositories/{user}/{repo}/commits/{branch}?pagelen=1"
+BRANCH_HEAD_URL = "https://api.bitbucket.org/2.0/repositories/{user}/{repo}/commit/{branch}"
 
 logger = logging.getLogger("octoprint.plugins.softwareupdate.version_checks.bitbucket_commit")
 
@@ -22,12 +22,11 @@ def _get_latest_commit(user, repo, branch):
 		return None
 
 	reference = r.json()
-	if not "values" in reference \
-			or len(reference["values"]) < 1 \
-			or not 'hash' in reference["values"][0]:
+
+	if not "hash" in reference:
 		return None
 
-	return reference["values"][0]['hash']
+	return reference["hash"]
 
 
 def get_latest(target, check):
