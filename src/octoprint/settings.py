@@ -179,7 +179,8 @@ default_settings = {
 	"gcodeAnalysis": {
 		"maxExtruders": 10,
 		"throttle_normalprio": 0.01,
-		"throttle_highprio": 0.0
+		"throttle_highprio": 0.0,
+		"throttle_lines": 100
 	},
 	"feature": {
 		"temperatureGraph": True,
@@ -335,7 +336,6 @@ default_settings = {
 			"enabled": False,
 			"okAfterResend": False,
 			"forceChecksum": False,
-			"okWithLinenumber": False,
 			"numExtruders": 1,
 			"includeCurrentToolInTemps": True,
 			"includeFilenameInOpened": True,
@@ -360,7 +360,8 @@ default_settings = {
 			"sharedNozzle": False,
 			"sendBusy": False,
 			"simulateReset": True,
-			"preparedOks": []
+			"preparedOks": [],
+			"okFormatString": "ok"
 		}
 	}
 }
@@ -555,7 +556,8 @@ class Settings(object):
 			self._configfile = os.path.join(self._basedir, "config.yaml")
 		self.load(migrate=True)
 
-		if self.get(["api", "key"]) is None:
+		apikey = self.get(["api", "key"])
+		if not apikey or apikey == "n/a":
 			self.set(["api", "key"], ''.join('%02X' % z for z in bytes(uuid.uuid4().bytes)))
 			self.save(force=True)
 

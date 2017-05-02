@@ -93,11 +93,15 @@ following section *completely* and also follow the instructions in the
 
 2. Please make sure to **test out the current version** of OctoPrint to see
    whether the problem you are encountering still exists, and **test without
-   any non-bundled plugins enabled** to make sure it's not a misbehaving
-   plugin causing the issue at hand.
+   any third-party plugins enabled** to make sure it's not a misbehaving
+   plugin causing the issue at hand. For that please restart OctoPrint in
+   **safe mode**, either by selecting "Restart OctoPrint in safe mode" from
+   the "System" menu, or by starting OctoPrint from the command line with
+   `octoprint serve --safe`. Then try to reproduce your issue. Find out
+   more about safe mode in the [docs](http://docs.octoprint.org/en/master/features/safemode.html).
 
-   If you are feeling up to it you might also want to try the current development
-   version of OctoPrint (if you aren't already). Refer to the [FAQ](https://github.com/foosel/OctoPrint/wiki/FAQ)
+   You might also want to try the current development version of OctoPrint
+   (if you aren't already). Refer to the [FAQ](https://github.com/foosel/OctoPrint/wiki/FAQ)
    for information on how to do this.
 
 3. The problem still exists? Then please **look through the
@@ -258,17 +262,18 @@ See [the corresponding chapter in the documentation](http://docs.octoprint.org/e
    just cause unnecessary work and frustration for everyone or
    possibly get the PR rejected.
 3. Create your pull request **from a custom branch** on your end (e.g.
-   `dev/myNewFeature`)[1] **against the `devel` branch**. Create **one pull request
-   per feature/bug fix**. If your PR contains an important bug fix, we will
-   make sure to backport it to the `maintenance` branch to also include it in
-   the next release.
-4. Make sure there are **only relevant changes** included in your PR. No
+   `dev/myNewFeature`)[1].
+4. Create your pull request **only against the `maintenance` or `devel` branch**:
+     * if it's a bug fix for a bug in the current stable version: `maintenance` branch
+     * otherwise: `devel` branch
+5. Create **one pull request per feature/bug fix**.
+6. Make sure there are **only relevant changes** included in your PR. No
    changes to unrelated files, no additional files that don't belong (e.g.
    commits of your full virtual environment). Make sure your PR consists
    **ideally of only one commit** (use git's rebase and squash functionality).
-5. Make sure you **follow the current coding style**. This means:
+7. Make sure you **follow the current coding style**. This means:
      * Tabs instead of spaces in the Python files[2]
-     * Spaces instead of tabs in the Javascript sources
+     * Spaces instead of tabs in the JavaScript sources
      * English language (code, variables, comments, ...)
      * Comments where necessary: Tell *why* the code does something like it does
        it, structure your code
@@ -277,22 +282,22 @@ See [the corresponding chapter in the documentation](http://docs.octoprint.org/e
        ``.less`` files from which the CSS is compiled.
      * Make sure you do not add dead code (e.g. commented out left-overs
        from experiments).
-6. Ensure your changes **pass the existing unit tests**. PRs that break
+8. Ensure your changes **pass the existing unit tests**. PRs that break
    those cannot be accepted.
-7. **Test your changes thoroughly**. That also means testing with usage
+9. **Test your changes thoroughly**. That also means testing with usage
    scenarios you don't normally use, e.g. if you only use access control, test
    without and vice versa. If you only test with your printer, test with the
    virtual printer and vice versa. State in your pull request how you tested
    your changes. Ideally **add unit tests** - OctoPrint severely lacks in that
    department, but we are trying to change that, so any new code already covered
    with a test suite helps a lot!
-8. In your pull request's description, **state what your pull request does**,
-   as in, what feature does it implement, what bug does it fix. The more
-   thoroughly you explain your intent behind the PR here, the higher the
-   chances it will get merged fast. There is a template provided below
-   that can help you here.
-9. Don't forget to **add yourself to the [AUTHORS](./AUTHORS.md)
-   file** :)
+10. In your pull request's description, **state what your pull request does**,
+    as in, what feature does it implement, what bug does it fix. The more
+    thoroughly you explain your intent behind the PR here, the higher the
+    chances it will get merged fast. There is a template provided below
+    that can help you here.
+11. Don't forget to **add yourself to the [AUTHORS](./AUTHORS.md)
+    file** :)
 
 Template to use for Pull Request descriptions:
 
@@ -397,6 +402,9 @@ the local version identifier to allow for an exact determination of the active c
   * 2016-09-23: Some more work on "How to file a bug report" based on recent
     experiences
   * 2017-01-25: Fixed a typo
+  * 2017-03-09: Allow PRs against `maintenance` branch for bugs in stable.
+  * 2017-03-10: Reproduce bugs in safe mode to make sure they are really caused
+    by OctoPrint itself and not a misbehaving plugin.
 
 ## Footnotes
   * [1] - If you are wondering why, the problem is that anything that you add
