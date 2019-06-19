@@ -58,7 +58,7 @@ msgstr ""
 "Project-Id-Version: OctoPrint\n"
 "Report-Msgid-Bugs-To: i18n@octoprint.org\n"
 "POT-Creation-Date: 2019-05-13 13:45+0200\n"
-"PO-Revision-Date: 2019-06-19 10:34+0200\n"
+"PO-Revision-Date: 2019-06-19 10:41+0200\n"
 "Last-Translator: dpmiguel <dpmiguel@gmail.com>\n"
 "Language-Team: Spanish (http://www.transifex.com/octoprint/octoprint/language/es/)\n"
 "MIME-Version: 1.0\n"
@@ -4805,7 +4805,7 @@ msgstr "Crear Carpeta..."
 
 #: src/octoprint/templates/sidebar/files.jinja2:89
 msgid "Hint: You can also drag and drop files on this page to upload them."
-msgstr "Sugerencia: también puede arrastrar y soltar archivos en esta página para subirlos."
+msgstr "Sugerencia: También puedes arrastrar y soltar archivos en la página para subirlos."
 
 #: src/octoprint/templates/sidebar/files_header.jinja2:2
 msgid "File list settings"
