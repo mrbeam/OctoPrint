@@ -58,7 +58,7 @@ msgstr ""
 "Project-Id-Version: OctoPrint\n"
 "Report-Msgid-Bugs-To: i18n@octoprint.org\n"
 "POT-Creation-Date: 2019-05-13 13:45+0200\n"
-"PO-Revision-Date: 2019-06-19 10:41+0200\n"
+"PO-Revision-Date: 2019-06-19 10:58+0200\n"
 "Last-Translator: dpmiguel <dpmiguel@gmail.com>\n"
 "Language-Team: Spanish (http://www.transifex.com/octoprint/octoprint/language/es/)\n"
 "MIME-Version: 1.0\n"
@@ -1909,7 +1909,7 @@ msgstr "La version del entorno de Python actual no soporta las actualizaciones d
 
 #: src/octoprint/plugins/softwareupdate/static/js/softwareupdate.js:253
 msgid "Those components marked with <i class=\"fa fa-check\"></i> can be updated directly."
-msgstr "Aquellos componentes marcados con <i class=\"fa fa-check\"></i> puede actualizarse directamente."
+msgstr "Aquellos componentes marcados con <i class=\"fa fa-check\"></i> pueden actualizarse directamente."
 
 #: src/octoprint/plugins/softwareupdate/static/js/softwareupdate.js:257
 msgid "To have updates applied, get in touch with an administrator of this OctoPrint instance."
