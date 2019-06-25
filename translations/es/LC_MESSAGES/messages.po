@@ -58,7 +58,7 @@ msgstr ""
 "Project-Id-Version: OctoPrint\n"
 "Report-Msgid-Bugs-To: i18n@octoprint.org\n"
 "POT-Creation-Date: 2019-05-13 13:45+0200\n"
-"PO-Revision-Date: 2019-06-25 11:24+0200\n"
+"PO-Revision-Date: 2019-06-25 12:56+0200\n"
 "Last-Translator: dpmiguel <dpmiguel@gmail.com>\n"
 "Language-Team: Spanish (http://www.transifex.com/octoprint/octoprint/language/es/)\n"
 "MIME-Version: 1.0\n"
@@ -1929,7 +1929,7 @@ msgstr "Actualizar ahora"
 
 #: src/octoprint/plugins/softwareupdate/static/js/softwareupdate.js:321
 msgid "Everything is up-to-date"
-msgstr "Esta todo actualizado"
+msgstr "Todo está actualizado"
 
 #: src/octoprint/plugins/softwareupdate/static/js/softwareupdate.js:345
 msgid "No internet connection"
@@ -2528,7 +2528,7 @@ msgstr "<strong>Está a punto de reiniciar el sistema en modo seguro.</strong></
 #: src/octoprint/static/js/app/helpers.js:628
 #: src/octoprint/templates/overlays/offline.jinja2:6
 msgid "Server is offline"
-msgstr "El servidor esta fuera de linea"
+msgstr "El servidor está fuera de línea"
 
 #: src/octoprint/static/js/app/dataupdater.js:91
 msgid "The server appears to be offline, at least I'm not getting any response from it. I'll try to reconnect automatically <strong>over the next couple of minutes</strong>, however you are welcome to try a manual reconnect anytime using the button below."
@@ -2730,7 +2730,7 @@ msgstr "Progreso"
 
 #: src/octoprint/static/js/app/main.js:202
 msgid "Offline"
-msgstr "Fuera de linea"
+msgstr "Fuera de línea"
 
 #: src/octoprint/static/js/app/main.js:203
 msgid "Opening serial port"
@@ -3446,7 +3446,7 @@ msgstr "Objetivo"
 #: src/octoprint/static/js/app/viewmodels/terminal.js:104
 #, python-format
 msgid "showing %(displayed)d lines (%(filtered)d of %(total)d total lines filtered, buffer full)"
-msgstr "smstrando %(displayed)d lineas (%(filtered)d de %(total)d lineas filtradas; buffer lleno)"
+msgstr "smstrando %(displayed)d líneas (%(filtered)d de %(total)d líneas filtradas; buffer lleno)"
 
 #: src/octoprint/static/js/app/viewmodels/terminal.js:106
 #, python-format
