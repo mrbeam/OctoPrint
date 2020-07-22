@@ -1,8 +1,9 @@
-# coding=utf-8
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 """
 This module provides a bunch of utility methods and helpers for version handling.
 """
-from __future__ import absolute_import, division, print_function
 
 __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agpl.html'
 
@@ -18,32 +19,7 @@ def get_octoprint_version_string():
 
 def get_octoprint_version(base=False):
 	octoprint_version_string = get_octoprint_version_string()
-
-	if "-" in octoprint_version_string:
-		octoprint_version_string = octoprint_version_string[:octoprint_version_string.find("-")]
-
-	octoprint_version = pkg_resources.parse_version(octoprint_version_string)
-
-	# A leading v is common in github release tags and old setuptools doesn't remove it. While OctoPrint's
-	# versions should never contain such a prefix, we'll make sure to have stuff behave the same
-	# regardless of setuptools version anyhow.
-	if octoprint_version and isinstance(octoprint_version, tuple) and octoprint_version[0].lower() == "*v":
-		octoprint_version = octoprint_version[1:]
-
-	if base:
-		if isinstance(octoprint_version, tuple):
-			# old setuptools
-			base_version = []
-			for part in octoprint_version:
-				if part.startswith("*"):
-					break
-				base_version.append(part)
-			base_version.append("*final")
-			octoprint_version = tuple(base_version)
-		else:
-			# new setuptools
-			octoprint_version = pkg_resources.parse_version(octoprint_version.base_version)
-	return octoprint_version
+	return get_comparable_version(octoprint_version_string, base=base)
 
 
 def is_released_octoprint_version(version=None):
@@ -134,9 +110,77 @@ def is_octoprint_compatible(*compatibility_entries, **kwargs):
 			s = pkg_resources.Requirement.parse("OctoPrint" + octo_compat)
 			if octoprint_version in s:
 				break
-		except:
+		except Exception:
 			logger.exception("Something is wrong with this compatibility string for OctoPrint: {}".format(octo_compat))
 	else:
 		return False
 
 	return True
+
+
+def get_python_version_string():
+	from platform import python_version
+	version_string = python_version()
+
+	# Debian has the python version set to 2.7.15+ which is not PEP440 compliant (bug 914072)
+	if version_string.endswith("+"):
+		version_string = version_string[:-1]
+
+	return version_string
+
+
+def get_python_version():
+	return get_comparable_version(get_python_version_string())
+
+
+def is_python_compatible(compat, **kwargs):
+	if not compat:
+		return True
+
+	python_version = kwargs.get("python_version")
+	if python_version is None:
+		python_version = get_python_version_string()
+
+	s = pkg_resources.Requirement.parse("Python" + compat)
+	return python_version in s
+
+
+def get_comparable_version(version_string, base=False):
+	if "-" in version_string:
+		version_string = version_string[:version_string.find("-")]
+
+	# Debian has the python version set to 2.7.15+ which is not PEP440 compliant (bug 914072)
+	if version_string.endswith("+"):
+		version_string = version_string[:-1]
+
+	version = pkg_resources.parse_version(version_string)
+
+	# A leading v is common in github release tags and old setuptools doesn't remove it.
+	if version and isinstance(version, tuple) and version[0].lower() == "*v":
+		version = version[1:]
+
+	if base:
+		if isinstance(version, tuple):
+			# old setuptools
+			base_version = []
+			for part in version:
+				if part.startswith("*"):
+					break
+				base_version.append(part)
+			base_version.append("*final")
+			version = tuple(base_version)
+		else:
+			# new setuptools
+			version = pkg_resources.parse_version(version.base_version)
+	return version
+
+
+def is_prerelease(version_string):
+	version = get_comparable_version(version_string)
+
+	if isinstance(version, tuple):
+		# old setuptools
+		return any(map(lambda x: x in version, ("*a", "*b", "*c", "*rc")))
+	else:
+		# new setuptools
+		return version.is_prerelease

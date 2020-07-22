@@ -1,5 +1,5 @@
-# coding=utf-8
-from __future__ import absolute_import, division, print_function
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 __author__ = "Gina Häußge <osd@foosel.net>"
 __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agpl.html'
@@ -18,9 +18,11 @@ import time
 
 from octoprint.events import Events, eventManager
 from octoprint.settings import settings
+from octoprint.util import monotonic_time
+from octoprint.util import get_fully_qualified_classname as fqcn
 
 
-class QueueEntry(collections.namedtuple("QueueEntry", "name, path, type, location, absolute_path, printer_profile")):
+class QueueEntry(collections.namedtuple("QueueEntry", "name, path, type, location, absolute_path, printer_profile, analysis")):
 	"""
 	A :class:`QueueEntry` for processing through the :class:`AnalysisQueue`. Wraps the entry's properties necessary
 	for processing.
@@ -33,6 +35,7 @@ class QueueEntry(collections.namedtuple("QueueEntry", "name, path, type, locatio
 	    location (str): Location the file is located on.
 	    absolute_path (str): Absolute path on disk through which to access the file.
 	    printer_profile (PrinterProfile): :class:`PrinterProfile` which to use for analysis.
+	    analysis (dict): :class:`GcodeAnalysisQueue` results from prior analysis, or ``None`` if there is none.
 	"""
 
 	def __str__(self):
@@ -50,8 +53,6 @@ class AnalysisQueue(object):
 	OctoPrint's :class:`AnalysisQueue` can manage various :class:`AbstractAnalysisQueue` implementations, mapped
 	by their machine code type.
 
-	At the moment, only the analysis of GCODE files for 3D printing is supported, through :class:`GcodeAnalysisQueue`.
-
 	By invoking :meth:`register_finish_callback` it is possible to register oneself as a callback to be invoked each
 	time the analysis of a queue entry finishes. The call parameters will be the finished queue entry as the first
 	and the analysis result as the second parameter. It is also possible to remove the registration again by invoking
@@ -62,12 +63,13 @@ class AnalysisQueue(object):
 	entry will be enqueued with the type specific analysis queue.
 	"""
 
-	def __init__(self):
+	def __init__(self, queue_factories):
 		self._logger = logging.getLogger(__name__)
 		self._callbacks = []
-		self._queues = dict(
-			gcode=GcodeAnalysisQueue(self._analysis_finished)
-		)
+
+		self._queues = dict()
+		for key, queue_factory in queue_factories.items():
+			self._queues[key] = queue_factory(self._analysis_finished)
 
 	def register_finish_callback(self, callback):
 		self._callbacks.append(callback)
@@ -76,6 +78,9 @@ class AnalysisQueue(object):
 		self._callbacks.remove(callback)
 
 	def enqueue(self, entry, high_priority=False):
+		if entry is None:
+			return False
+
 		if not entry.type in self._queues:
 			return False
 
@@ -83,33 +88,37 @@ class AnalysisQueue(object):
 		return True
 
 	def dequeue(self, entry):
+		if entry is None:
+			return False
+
 		if not entry.type in self._queues:
 			return False
 
 		self._queues[entry.type].dequeue(entry.location, entry.path)
 
 	def dequeue_folder(self, destination, path):
-		for queue in self._queues.values():
-			queue.dequeue_folder(destination, path)
+		for q in self._queues.values():
+			q.dequeue_folder(destination, path)
 
 	def pause(self):
-		for queue in self._queues.values():
-			queue.pause()
+		for q in self._queues.values():
+			q.pause()
 
 	def resume(self):
-		for queue in self._queues.values():
-			queue.resume()
+		for q in self._queues.values():
+			q.resume()
 
 	def _analysis_finished(self, entry, result):
 		for callback in self._callbacks:
-			callback(entry, result)
+			try:
+				callback(entry, result)
+			except:
+				self._logger.exception(u"Error while pushing analysis data to callback {}".format(callback),
+				                       extra=dict(callback=fqcn(callback)))
 		eventManager().fire(Events.METADATA_ANALYSIS_FINISHED, {"name": entry.name,
 		                                                        "path": entry.path,
 		                                                        "origin": entry.location,
-		                                                        "result": result,
-
-		                                                        # TODO: deprecated, remove in a future release
-		                                                        "file": entry.path})
+		                                                        "result": result})
 
 class AbstractAnalysisQueue(object):
 	"""
@@ -167,7 +176,10 @@ class AbstractAnalysisQueue(object):
 		        (False, default)
 		"""
 
-		if high_priority:
+		if settings().get(["gcodeAnalysis", "runAt"]) == "never":
+			self._logger.debug("Ignoring entry {entry} for analysis queue".format(entry=entry))
+			return
+		elif high_priority:
 			self._logger.debug("Adding entry {entry} to analysis queue with high priority".format(entry=entry))
 			prio = self.__class__.HIGH_PRIO
 		else:
@@ -243,20 +255,17 @@ class AbstractAnalysisQueue(object):
 		self._current_progress = 0
 
 		try:
-			start_time = time.time()
+			start_time = monotonic_time()
 			self._logger.info("Starting analysis of {}".format(entry))
 			eventManager().fire(Events.METADATA_ANALYSIS_STARTED, {"name": entry.name,
 			                                                       "path": entry.path,
 			                                                       "origin": entry.location,
-			                                                       "type": entry.type,
-
-			                                                       # TODO deprecated, remove in 1.4.0
-			                                                       "file": entry.path})
+			                                                       "type": entry.type})
 			try:
 				result = self._do_analysis(high_priority=high_priority)
 			except TypeError:
 				result = self._do_analysis()
-			self._logger.info("Analysis of entry {} finished, needed {:.2f}s".format(entry, time.time() - start_time))
+			self._logger.info("Analysis of entry {} finished, needed {:.2f}s".format(entry, monotonic_time() - start_time))
 			self._finished_callback(self._current, result)
 		finally:
 			self._current = None
@@ -293,7 +302,7 @@ class GcodeAnalysisQueue(AbstractAnalysisQueue):
 	   - * **Key**
 	     * **Description**
 	   - * ``estimatedPrintTime``
-	     * Estimated time the file take to print, in minutes
+	     * Estimated time the file take to print, in seconds
 	   - * ``filament``
 	     * Substructure describing estimated filament usage. Keys are ``tool0`` for the first extruder, ``tool1`` for
 	       the second and so on. For each tool extruded length and volume (based on diameter) are provided.
@@ -301,6 +310,28 @@ class GcodeAnalysisQueue(AbstractAnalysisQueue):
 	     * The extruded length in mm
 	   - * ``filament.toolX.volume``
 	     * The extruded volume in cm³
+	   - * ``printingArea``
+	     * Bounding box of the printed object in the print volume (minimum and maximum coordinates)
+	   - * ``printingArea.minX``
+	     * Minimum X coordinate of the printed object
+	   - * ``printingArea.maxX``
+	     * Maximum X coordinate of the printed object
+	   - * ``printingArea.minY``
+	     * Minimum Y coordinate of the printed object
+	   - * ``printingArea.maxY``
+	     * Maximum Y coordinate of the printed object
+	   - * ``printingArea.minZ``
+	     * Minimum Z coordinate of the printed object
+	   - * ``printingArea.maxZ``
+	     * Maximum Z coordinate of the printed object
+	   - * ``dimensions``
+	     * Dimensions of the printed object in X, Y, Z
+	   - * ``dimensions.width``
+	     * Width of the printed model along the X axis, in mm
+	   - * ``dimensions.depth``
+	     * Depth of the printed model along the Y axis, in mm
+	   - * ``dimensions.height``
+	     * Height of the printed model along the Z axis, in mm
 	"""
 
 	def __init__(self, finished_callback):
@@ -314,6 +345,8 @@ class GcodeAnalysisQueue(AbstractAnalysisQueue):
 		import sys
 		import yaml
 
+		if self._current.analysis:
+			return self._current.analysis
 		try:
 			throttle = settings().getFloat(["gcodeAnalysis", "throttle_highprio"]) if high_priority \
 				else settings().getFloat(["gcodeAnalysis", "throttle_normalprio"])
@@ -337,7 +370,7 @@ class GcodeAnalysisQueue(AbstractAnalysisQueue):
 			self._logger.info("Invoking analysis command: {}".format(" ".join(command)))
 
 			self._aborted = False
-			p = sarge.run(command, async=True, stdout=sarge.Capture())
+			p = sarge.run(command, async_=True, stdout=sarge.Capture())
 
 			while len(p.commands) == 0:
 				# somewhat ugly... we can't use wait_events because
@@ -352,7 +385,7 @@ class GcodeAnalysisQueue(AbstractAnalysisQueue):
 
 			if not p.commands[0].process:
 				# the process might have been set to None in case of any exception
-				raise RuntimeError(u"Error while trying to run command {}".format(" ".join(command)))
+				raise RuntimeError("Error while trying to run command {}".format(" ".join(command)))
 
 			try:
 				# let's wait for stuff to finish

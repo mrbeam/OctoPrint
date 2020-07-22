@@ -22,6 +22,11 @@ Bed
   corresponding resource returns temperature information including an optional history. Note that Bed commands
   are only available if the currently selected printer profile has a heated bed.
   See :ref:`sec-api-printer-bedcommand`.
+Chamber
+  Chamber commands allow setting the temperature and temperature offset for the printer's heated chamber. Querying
+  the corresponding resource returns temperature information including an option history. Note that Chamber commands
+  are only available if the currently selected printer profile has a heated chamber.
+  See :ref:`sec-api-printer-chambercommand`.
 SD card
   SD commands allow initialization, refresh and release of the printer's SD card (if available). Querying the
   corresponding resource returns the current SD card state.
@@ -37,7 +42,7 @@ Besides that, OctoPrint also provides a :ref:`full state report of the printer <
    OctoPrint's internal webserver is single threaded and can only handle one request at a time. This is
    not a problem generally since asynchronous programming allows to just have one request which is waiting for
    data from a long running backend operation to sleep while handling other requests. The internal framework
-   used for providing the REST API though, Flask, is based on WSGI, which is synchrounous in nature. This means
+   used for providing the REST API though, Flask, is based on WSGI, which is synchronous in nature. This means
    that it is impossible to wait in a non blocking wait while handling a request on the REST API. So in order to
    return the response of a command sent to the printer, the single thread of the webserver would have to be blocked
    by the API while the response wasn't available yet. Which in turn would mean that the whole web server would
@@ -74,6 +79,8 @@ Retrieve the current printer state
 
    Returns a :http:statuscode:`200` with a :ref:`Full State Response <sec-api-printer-datamodel-fullstate>` in the
    body upon success.
+
+   Requires the ``STATUS`` permission.
 
    **Example 1**
 
@@ -149,6 +156,8 @@ Retrieve the current printer state
             "operational": true,
             "paused": false,
             "printing": false,
+            "cancelling": false,
+            "pausing": false,
             "sdReady": true,
             "error": false,
             "ready": true,
@@ -179,6 +188,8 @@ Retrieve the current printer state
             "operational": true,
             "paused": false,
             "printing": false,
+            "cancelling": false,
+            "pausing": false,
             "sdReady": true,
             "error": false,
             "ready": true,
@@ -213,9 +224,9 @@ Issue a print head command
      * ``z``: Optional. Amount/coordinate to jog print head on z axis, must be a valid number corresponding to the distance to travel in mm.
      * ``absolute``: Optional. Boolean value specifying whether to move relative to current position (provided
        axes values are relative amounts) or to absolute position (provided axes values are coordinates)
-     * ``speed``: Optiona. Speed at which to move. If not provided, minimum speed for all selected axes from printer
+     * ``speed``: Optional. Speed at which to move. If not provided, minimum speed for all selected axes from printer
        profile will be used. If provided but ``false``, no speed parameter will be appended to the command. Otherwise
-       interpreted as an integer signifying the speed in mm/s, to append to the command.
+       interpreted as an integer signifying the speed in mm/min, to append to the command.
 
    home
      Homes the print head in all of the given axes. Additional parameters are:
@@ -223,16 +234,16 @@ Issue a print head command
      * ``axes``: A list of axes which to home, valid values are one or more of ``x``, ``y``, ``z``.
 
    feedrate
-     Changes the feedrate factor to apply to the movement's of the axes.
+     Changes the feedrate factor to apply to the movements of the axes.
 
-     * ``factor``: The new factor, percentage as integer or float (percentage divided by 100) between 50 and 200%.
+     * ``factor``: The new factor, percentage between 50 and 200% as integer (``50`` to ``200``) or float (``0.5`` to ``2.0``).
 
    All of these commands except ``feedrate`` may only be sent if the printer is currently operational and not printing.
    Otherwise a :http:statuscode:`409` is returned.
 
    Upon success, a status code of :http:statuscode:`204` and an empty body is returned.
 
-   Requires user rights.
+   Requires the ``CONTROL`` permission.
 
    **Example Jog Request**
 
@@ -276,9 +287,9 @@ Issue a print head command
 
       HTTP/1.1 204 No Content
 
-   **Example feed rate request**
+   **Example feed rate request (1/2)**
 
-   Set the feed rate factor to 105%.
+   Set the feed rate factor to 105% using an integer argument.
 
    .. sourcecode:: http
 
@@ -290,6 +301,26 @@ Issue a print head command
       {
         "command": "feedrate",
         "factor": 105
+      }
+
+   .. sourcecode:: http
+
+      HTTP/1.1 204 No Content
+
+   **Example feed rate request (2/2)**
+
+   Set the feed rate factor to 105% using a float argument.
+
+   .. sourcecode:: http
+
+      POST /api/printer/printhead HTTP/1.1
+      Host: example.com
+      Content-Type: application/json
+      X-Api-Key: abcdef...
+
+      {
+        "command": "feedrate",
+        "factor": 1.05
       }
 
    .. sourcecode:: http
@@ -321,7 +352,7 @@ Issue a tool command
      Sets the given target temperature on the printer's tools. Additional parameters:
 
      * ``targets``: Target temperature(s) to set, properties must match the format ``tool{n}`` with ``n`` being the
-       tool's index starting with 0.
+       tool's index starting with 0. A value of `0` will turn the heater off.
 
    offset
      Sets the given temperature offset on the printer's tools. Additional parameters:
@@ -338,18 +369,20 @@ Issue a tool command
      Extrudes the given amount of filament from the currently selected tool. Additional parameters:
 
      * ``amount``: The amount of filament to extrude in mm. May be negative to retract.
+     * ``speed``: Optional. Speed at which to extrude. If not provided, maximum speed for E axis from printer
+       profile will be used. Otherwise interpreted as an integer signifying the speed in mm/min, to append to the command.
 
    flowrate
      Changes the flow rate factor to apply to extrusion of the tool.
 
-     * ``factor``: The new factor, percentage as integer or float (percentage divided by 100) between 75 and 125%.
+     * ``factor``: The new factor, percentage between 75 and 125% as integer (``75`` to ``125``) or float (``0.75`` to ``1.25``).
 
    All of these commands may only be sent if the printer is currently operational and -- in case of ``select`` and
    ``extrude`` -- not printing. Otherwise a :http:statuscode:`409` is returned.
 
    Upon success, a status code of :http:statuscode:`204` and an empty body is returned.
 
-   Requires user rights.
+   Requires the ``CONTROL`` permission.
 
    **Example Target Temperature Request**
 
@@ -457,9 +490,9 @@ Issue a tool command
 
       HTTP/1.1 204 No Content
 
-   **Example flow rate request**
+   **Example flow rate request (1/2)**
 
-   Set the flow rate factor to 95%.
+   Set the flow rate factor to 95% using an integer attribute.
 
    .. sourcecode:: http
 
@@ -471,6 +504,26 @@ Issue a tool command
       {
         "command": "flowrate",
         "factor": 95
+      }
+
+   .. sourcecode:: http
+
+      HTTP/1.1 204 No Content
+
+   **Example flow rate request (2/2)**
+
+   Set the flow rate factor to 95% using a float attribute.
+
+   .. sourcecode:: http
+
+      POST /api/printer/tool HTTP/1.1
+      Host: example.com
+      Content-Type: application/json
+      X-Api-Key: abcdef...
+
+      {
+        "command": "flowrate",
+        "factor": 0.95
       }
 
    .. sourcecode:: http
@@ -503,6 +556,8 @@ Retrieve the current tool state
    amount of returned history data points can be limited using the ``limit`` query parameter.
 
    Returns a :http:statuscode:`200` with a Temperature Response in the body upon success.
+
+   Requires the ``STATUS`` permission.
 
    .. note::
       If you want both tool and bed temperature information at the same time, take a look at
@@ -577,12 +632,12 @@ Issue a bed command
    are:
 
    target
-     Sets the given target temperature on the printer's tools. Additional parameters:
+     Sets the given target temperature on the printer's bed. Additional parameters:
 
-     * ``target``: Target temperature to set.
+     * ``target``: Target temperature to set. A value of `0` will turn the heater off.
 
    offset
-     Sets the given temperature offset on the printer's tools. Additional parameters:
+     Sets the given temperature offset on the printer's bed. Additional parameters:
 
      * ``offset``: Offset to set.
 
@@ -594,7 +649,7 @@ Issue a bed command
    If no heated bed is configured for the currently selected printer profile, the resource will return
    an :http:statuscode:`409`.
 
-   Requires user rights.
+   Requires the ``CONTROL`` permission.
 
    **Example Target Temperature Request**
 
@@ -663,8 +718,10 @@ Retrieve the current bed state
    If no heated bed is configured for the currently selected printer profile, the resource will return
    an :http:statuscode:`409`.
 
+   Requires the ``STATUS`` permission.
+
    .. note::
-      If you want both tool and bed temperature information at the same time, take a look at
+      If you want tool, bed and chamber temperature information at the same time, take a look at
       :ref:`Retrieve the current printer state <sec-api-printer-state>`.
 
    **Example**
@@ -714,6 +771,156 @@ Retrieve the current bed state
    :statuscode 409: If the printer is not operational or the selected printer profile
                     does not have a heated bed.
 
+.. _sec-api-printer-chambercommand:
+
+Issue a chamber command
+=======================
+
+.. http:post:: /api/printer/chamber
+
+   Chamber commands allow setting the temperature and temperature offsets for the printer's heated chamber. Available commands
+   are:
+
+   target
+     Sets the given target temperature on the printer's chamber. Additional parameters:
+
+     * ``target``: Target temperature to set. A value of `0` will turn the heater off.
+
+   offset
+     Sets the given temperature offset on the printer's chamber. Additional parameters:
+
+     * ``offset``: Offset to set.
+
+   All of these commands may only be sent if the printer is currently operational. Otherwise a :http:statuscode:`409`
+   is returned.
+
+   Upon success, a status code of :http:statuscode:`204` and an empty body is returned.
+
+   If no heated chamber is configured for the currently selected printer profile, the resource will return
+   an :http:statuscode:`409`.
+
+   Requires the ``CONTROL`` permission.
+
+   **Example Target Temperature Request**
+
+   Set the target temperature for the printer's heated chamber to 50°C.
+
+   .. sourcecode:: http
+
+      POST /api/printer/chamber HTTP/1.1
+      Host: example.com
+      Content-Type: application/json
+      X-Api-Key: abcdef...
+
+      {
+        "command": "target",
+        "target": 50
+      }
+
+   .. sourcecode:: http
+
+      HTTP/1.1 204 No Content
+
+   **Example Offset Temperature Request**
+
+   Set the temperature offset for the heated chamber to -5°C.
+
+   .. sourcecode:: http
+
+      POST /api/printer/chamber HTTP/1.1
+      Host: example.com
+      Content-Type: application/json
+      X-Api-Key: abcdef...
+
+      {
+        "command": "offset",
+        "offset": -5
+      }
+
+   .. sourcecode:: http
+
+      HTTP/1.1 204 No Content
+
+   :json string command: The command to issue, either ``target`` or ``offset``.
+   :json object target: ``target`` command: The target temperature to set.
+   :json object offset: ``offset`` command: The offset temperature to set.
+   :statuscode 204: No error
+   :statuscode 400: If ``target`` or ``offset`` is not a valid number or outside of the supported range, or if the
+                    request is otherwise invalid.
+   :statuscode 409: If the printer is not operational or the selected printer profile
+                    does not have a heated chamber.
+
+.. _sec-api-printer-chamberstate:
+
+Retrieve the current chamber state
+==================================
+
+.. http:get:: /api/printer/chamber
+
+   Retrieves the current temperature data (actual, target and offset) plus optionally a (limited) history (actual, target,
+   timestamp) for the printer's heated chamber.
+
+   It's also possible to retrieve the temperature history by supplying the ``history`` query parameter set to ``true``. The
+   amount of returned history data points can be limited using the ``limit`` query parameter.
+
+   Returns a :http:statuscode:`200` with a Temperature Response in the body upon success.
+
+   If no heated chamber is configured for the currently selected printer profile, the resource will return
+   an :http:statuscode:`409`.
+
+   Requires the ``STATUS`` permission.
+
+   .. note::
+      If you want tool, bed and chamber temperature information at the same time, take a look at
+      :ref:`Retrieve the current printer state <sec-api-printer-state>`.
+
+   **Example**
+
+   Query the chamber temperature data and also include the temperature history but limit it to two entries.
+
+   .. sourcecode:: http
+
+      GET /api/printer/chamber?history=true&limit=2 HTTP/1.1
+      Host: example.com
+      X-Api-Key: abcdef...
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+        "chamber": {
+          "actual": 50.221,
+          "target": 70.0,
+          "offset": 5
+        },
+        "history": [
+          {
+            "time": 1395651928,
+            "chamber": {
+              "actual": 50.221,
+              "target": 70.0
+            }
+          },
+          {
+            "time": 1395651926,
+            "chamber": {
+              "actual": 49.1123,
+              "target": 70.0
+            }
+          }
+        ]
+      }
+
+   :query history:  If set to ``true`` (or: ``yes``, ``y``, ``1``), history information will be included in the response
+                    too. If no ``limit`` parameter is given, all available temperature history data will be returned.
+   :query limit:    If set to an integer (``n``), only the last ``n`` data points from the printer's temperature history
+                    will be returned. Will be ignored if ``history`` is not enabled.
+   :statuscode 200: No error
+   :statuscode 409: If the printer is not operational or the selected printer profile
+                    does not have a heated chamber.
+
 .. _sec-api-printer-sdcommand:
 
 Issue an SD command
@@ -745,7 +952,7 @@ Issue an SD command
 
    Upon success, a status code of :http:statuscode:`204` and an empty body is returned.
 
-   Requires user rights.
+   Requires the ``CONTROL`` permission.
 
    **Example Init Request**
 
@@ -823,6 +1030,8 @@ Retrieve the current SD state
    Returns a :http:statuscode:`200` with an :ref:`SD State Response <sec-api-printer-datamodel-sdstate>` in the body
    upon success.
 
+   Requires the ``STATUS`` permission.
+
    **Example**
 
    Read the current state of the SD card.
@@ -859,7 +1068,7 @@ Send an arbitrary command to the printer
 
    If successful returns a :http:statuscode:`204` and an empty body.
 
-   Requires user rights.
+   Requires the ``CONTROL`` permission.
 
    **Example for sending a single command**
 
@@ -901,6 +1110,26 @@ Send an arbitrary command to the printer
    :json string command:  Single command to send to the printer, mutually exclusive with ``commands``.
    :json string commands: List of commands to send to the printer, mutually exclusive with ``command``.
    :statuscode 204:       No error
+
+.. _sec-api-printer-customcontrols:
+
+Retrieve custom controls
+========================
+
+.. http:get:: /api/printer/command/custom
+
+   Retrieves the :ref:`custom controls <sec-features-custom_controls>` as configured in
+   :ref:`config.yaml <sec-configuration-config_yaml>`.
+
+   Please refer to the documentation of :ref:`custom controls <sec-features-custom_controls>` on what
+   data structure to expect here.
+
+   Returns a :http:statuscode:`200` with an :ref:`Custom Controls Response <sec-api-printer-datamodel-customcontrols>`
+   in the body upon success.
+
+   Requires the ``CONTROL`` permission.
+
+   :statuscode 200: No error
 
 .. _sec-api-printer-datamodel:
 
@@ -1012,3 +1241,21 @@ Arbitrary Command Request
      - 0..1
      - Map of key value pairs
      - (only if ``script`` is set) additional template variables to provide to the script renderer
+
+.. _sec-api-printer-datamodel-customcontrols:
+
+Custom Controls Response
+------------------------
+
+.. list-table::
+   :widths: 15 5 10 30
+   :header-rows: 1
+
+   * - Name
+     - Multiplicity
+     - Type
+     - Description
+   * - ``controls``
+     - 0..n
+     - List of :ref:`custom controls <sec-features-custom_controls>`
+     - A list of custom control definitions as defined in ``config.yaml``.

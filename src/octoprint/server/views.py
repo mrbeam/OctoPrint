@@ -1,5 +1,5 @@
-# coding=utf-8
-from __future__ import absolute_import, division, print_function
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 __author__ = "Gina Häußge <osd@foosel.net>"
 __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agpl.html'
@@ -7,21 +7,22 @@ __copyright__ = "Copyright (C) 2015 The OctoPrint Project - Released under terms
 
 import os
 import datetime
-import codecs
+import io
 
 from past.builtins import basestring
 
 from collections import defaultdict
-from flask import request, g, url_for, make_response, render_template, send_from_directory, redirect, abort
+from flask import request, g, url_for, make_response, render_template, send_from_directory, redirect, abort, Response
 
 import octoprint.plugin
 
-from octoprint.server import app, userManager, pluginManager, gettext, \
-	debug, LOCALES, VERSION, DISPLAY_VERSION, UI_API_KEY, BRANCH, preemptiveCache, \
+from octoprint.server import app, userManager, groupManager, pluginManager, gettext, \
+	debug, LOCALES, VERSION, DISPLAY_VERSION, BRANCH, preemptiveCache, \
 	NOT_MODIFIED
+from octoprint.access.permissions import Permissions
 from octoprint.settings import settings
-from octoprint.filemanager import get_all_extensions
-from octoprint.util import to_unicode
+from octoprint.filemanager import full_extension_tree, get_all_extensions
+from octoprint.util import to_unicode, to_bytes, sv
 
 import re
 import base64
@@ -75,7 +76,7 @@ def _preemptive_data(key, path=None, base_url=None, data=None, additional_reques
 				if "query_string" in data:
 					data["query_string"] = "l10n={}&{}".format(g.locale.language, data["query_string"])
 				d.update(data)
-		except:
+		except Exception:
 			_logger.exception("Error collecting data for preemptive cache from plugin {}".format(key))
 
 	# add additional request data if we have any
@@ -86,7 +87,7 @@ def _preemptive_data(key, path=None, base_url=None, data=None, additional_reques
 				d.update(dict(
 					_additional_request_data=ard
 				))
-		except:
+		except Exception:
 			_logger.exception("Error retrieving additional data for preemptive cache from plugin {}".format(key))
 
 	return d
@@ -106,7 +107,7 @@ def _cache_key(ui, url=None, locale=None, additional_key_data=None):
 				if not isinstance(ak, (list, tuple)):
 					ak = [ak]
 				k = "{}:{}".format(k, ":".join(ak))
-		except:
+		except Exception:
 			_logger.exception("Error while trying to retrieve additional cache key parts for ui {}".format(ui))
 	return k
 
@@ -123,18 +124,22 @@ def in_cache():
 	ui_plugins = pluginManager.get_implementations(octoprint.plugin.UiPlugin,
 	                                               sorting_context="UiPlugin.on_ui_render")
 	for plugin in ui_plugins:
-		if plugin.will_handle_ui(request):
-			ui = plugin._identifier
-			key = _cache_key(plugin._identifier,
-			                 url=url,
-			                 additional_key_data=plugin.get_ui_additional_key_data_for_cache)
-			unless = _preemptive_unless(url, additional_unless=plugin.get_ui_preemptive_caching_additional_unless)
-			data = _preemptive_data(plugin._identifier,
-			                        path=path,
-			                        base_url=base_url,
-			                        data=plugin.get_ui_data_for_preemptive_caching,
-			                        additional_request_data=plugin.get_ui_additional_request_data_for_preemptive_caching)
-			break
+		try:
+			if plugin.will_handle_ui(request):
+				ui = plugin._identifier
+				key = _cache_key(plugin._identifier,
+				                 url=url,
+				                 additional_key_data=plugin.get_ui_additional_key_data_for_cache)
+				unless = _preemptive_unless(url, additional_unless=plugin.get_ui_preemptive_caching_additional_unless)
+				data = _preemptive_data(plugin._identifier,
+				                        path=path,
+				                        base_url=base_url,
+				                        data=plugin.get_ui_data_for_preemptive_caching,
+				                        additional_request_data=plugin.get_ui_additional_request_data_for_preemptive_caching)
+				break
+		except Exception:
+			_logger.exception("Error while calling plugin {}, skipping it".format(plugin._identifier),
+			                  extra=dict(plugin=plugin._identifier))
 	else:
 		ui = "_default"
 		key = _cache_key("_default", url=url)
@@ -159,6 +164,8 @@ def in_cache():
 
 @app.route("/")
 def index():
+	from octoprint.server import printer
+
 	global _templates, _plugin_names, _plugin_vars
 
 	preemptive_cache_enabled = settings().getBoolean(["devel", "cache", "preemptive"])
@@ -169,18 +176,28 @@ def index():
 	def wizard_active(templates):
 		return templates is not None and bool(templates["wizard"]["order"])
 
-	# we force a refresh if the client forces one or if we have wizards cached
-	force_refresh = util.flask.cache_check_headers() or "_refresh" in request.values or wizard_active(_templates.get(locale))
+	# we force a refresh if the client forces one and we are not printing or if we have wizards cached
+	client_refresh = util.flask.cache_check_headers()
+	request_refresh = "_refresh" in request.values
+	printing = printer.is_printing()
+	if client_refresh and printing:
+		logging.getLogger(__name__).warn("Client requested cache refresh via cache-control headers but we are printing. "
+		                                 "Not invalidating caches due to resource limitation. Append ?_refresh=true to "
+		                                 "the URL if you absolutely require a refresh now")
+	client_refresh = client_refresh and not printing
+	force_refresh = client_refresh \
+	                or request_refresh \
+	                or wizard_active(_templates.get(locale))
 
 	# if we need to refresh our template cache or it's not yet set, process it
-	if force_refresh or _templates.get(locale) is None or _plugin_names is None or _plugin_vars is None:
-		_templates[locale], _plugin_names, _plugin_vars = _process_templates()
+	fetch_template_data(refresh=force_refresh)
 
 	now = datetime.datetime.utcnow()
 
 	enable_accesscontrol = userManager.enabled
 	enable_gcodeviewer = settings().getBoolean(["gcodeViewer", "enabled"])
-	enable_timelapse = bool(settings().get(["webcam", "snapshot"]) and settings().get(["webcam", "ffmpeg"]))
+	enable_timelapse = settings().getBoolean(["webcam", "timelapseEnabled"])
+	enable_loading_animation = settings().getBoolean(["devel", "showLoadingAnimation"])
 
 	def default_template_filter(template_type, template_key):
 		if template_type == "navbar":
@@ -197,7 +214,11 @@ def index():
 
 	default_additional_etag = [enable_accesscontrol,
 	                           enable_gcodeviewer,
-	                           enable_timelapse]
+	                           enable_timelapse,
+	                           enable_loading_animation,
+	                           wizard_active(_templates.get(locale))] + sorted(["{}:{}".format(to_unicode(k, errors="replace"),
+	                                                                                           to_unicode(v, errors="replace"))
+	                                                                           for k, v in _plugin_vars.items()])
 
 	def get_preemptively_cached_view(key, view, data=None, additional_request_data=None, additional_unless=None):
 		if (data is None and additional_request_data is None) or g.locale is None:
@@ -239,7 +260,7 @@ def index():
 					files = custom_files()
 					if files:
 						return files
-				except:
+				except Exception:
 					_logger.exception("Error while trying to retrieve tracked files for plugin {}".format(key))
 
 			templates = _get_all_templates()
@@ -254,7 +275,7 @@ def index():
 					af = additional_files()
 					if af:
 						files += af
-				except:
+				except Exception:
 					_logger.exception("Error while trying to retrieve additional tracked files for plugin {}".format(key))
 
 			return sorted(set(files))
@@ -265,7 +286,7 @@ def index():
 					lastmodified = custom_lastmodified()
 					if lastmodified:
 						return lastmodified
-				except:
+				except Exception:
 					_logger.exception("Error while trying to retrieve custom LastModified value for plugin {}".format(key))
 
 			if files is None:
@@ -278,7 +299,7 @@ def index():
 					etag = custom_etag()
 					if etag:
 						return etag
-				except:
+				except Exception:
 					_logger.exception("Error while trying to retrieve custom ETag value for plugin {}".format(key))
 
 			if files is None:
@@ -293,13 +314,14 @@ def index():
 
 			import hashlib
 			hash = hashlib.sha1()
-			hash.update(octoprint.__version__)
-			hash.update(octoprint.server.UI_API_KEY)
-			hash.update(",".join(sorted(files)))
+			def hash_update(value):
+				hash.update(to_bytes(value, encoding="utf-8", errors="replace"))
+			hash_update(octoprint.__version__)
+			hash_update(",".join(sorted(files)))
 			if lastmodified:
-				hash.update(lastmodified)
+				hash_update(lastmodified)
 			for add in additional:
-				hash.update(str(add))
+				hash_update(add)
 			return hash.hexdigest()
 
 		decorated_view = view
@@ -309,6 +331,7 @@ def index():
 		                                   refreshif=validate_cache,
 		                                   key=cache_key,
 		                                   unless_response=lambda response: util.flask.cache_check_response_headers(response) or util.flask.cache_check_status_code(response, _valid_status_for_cache))(decorated_view)
+		decorated_view = util.flask.with_client_revalidation(decorated_view)
 		decorated_view = util.flask.conditional(check_etag_and_lastmodified, NOT_MODIFIED)(decorated_view)
 		return decorated_view
 
@@ -348,18 +371,18 @@ def index():
 		filtered_templates = _filter_templates(_templates[locale], default_template_filter)
 
 		wizard = wizard_active(filtered_templates)
-		accesscontrol_active = enable_accesscontrol and userManager.hasBeenCustomized()
+		accesscontrol_active = enable_accesscontrol and userManager.has_been_customized()
 
 		render_kwargs = _get_render_kwargs(filtered_templates,
 		                                   _plugin_names,
 		                                   _plugin_vars,
 		                                   now)
-
 		render_kwargs.update(dict(
-			webcamStream=settings().get(["webcam", "stream"]),
+			enableWebcam=settings().getBoolean(["webcam", "webcamEnabled"]) and bool(settings().get(["webcam", "stream"])),
 			enableTemperatureGraph=settings().get(["feature", "temperatureGraph"]),
 			enableAccessControl=enable_accesscontrol,
 			accessControlActive=accesscontrol_active,
+			enableLoadingAnimation=enable_loading_animation,
 			enableSdSupport=settings().get(["feature", "sdSupport"]),
 			gcodeMobileThreshold=settings().get(["gcodeViewer", "mobileSizeThreshold"]),
 			gcodeThreshold=settings().get(["gcodeViewer", "sizeThreshold"]),
@@ -395,22 +418,34 @@ def index():
 			plugin = pluginManager.get_plugin_info(forced_view, require_enabled=True)
 			if plugin is not None and isinstance(plugin.implementation, octoprint.plugin.UiPlugin):
 				response = plugin_view(plugin.implementation)
+				if _logger.isEnabledFor(logging.DEBUG) and isinstance(response, Response):
+					response.headers["X-Ui-Plugin"] = plugin._identifier
 		else:
 			response = default_view()
+			if _logger.isEnabledFor(logging.DEBUG) and isinstance(response, Response):
+				response.headers["X-Ui-Plugin"] = "_default"
 
 	else:
 		# select view from plugins and fall back on default view if no plugin will handle it
 		ui_plugins = pluginManager.get_implementations(octoprint.plugin.UiPlugin, sorting_context="UiPlugin.on_ui_render")
 		for plugin in ui_plugins:
-			if plugin.will_handle_ui(request):
-				# plugin claims responsibility, let it render the UI
-				response = plugin_view(plugin)
-				if response is not None:
-					break
-				else:
-					_logger.warn("UiPlugin {} returned an empty response".format(plugin._identifier))
+			try:
+				if plugin.will_handle_ui(request):
+					# plugin claims responsibility, let it render the UI
+					response = plugin_view(plugin)
+					if response is not None:
+						if _logger.isEnabledFor(logging.DEBUG) and isinstance(response, Response):
+							response.headers["X-Ui-Plugin"] = plugin._identifier
+						break
+					else:
+						_logger.warning("UiPlugin {} returned an empty response".format(plugin._identifier))
+			except Exception:
+				_logger.exception("Error while calling plugin {}, skipping it".format(plugin._identifier),
+				                  extra=dict(plugin=plugin._identifier))
 		else:
 			response = default_view()
+			if _logger.isEnabledFor(logging.DEBUG) and isinstance(response, Response):
+				response.headers["X-Ui-Plugin"] = "_default"
 
 	if response is None:
 		return abort(404)
@@ -418,11 +453,22 @@ def index():
 
 
 def _get_render_kwargs(templates, plugin_names, plugin_vars, now):
+	global _logger
+
 	#~~ a bunch of settings
 
 	first_run = settings().getBoolean(["server", "firstRun"])
-	locales = dict((l.language, dict(language=l.language, display=l.display_name, english=l.english_name)) for l in LOCALES)
-	extensions = map(lambda ext: ".{}".format(ext), get_all_extensions())
+
+	locales = dict()
+	for l in LOCALES:
+		try:
+			locales[l.language] = dict(language=l.language, display=l.display_name, english=l.english_name)
+		except Exception:
+			_logger.exception("Error while collecting available locales")
+
+	permissions = [permission.as_dict() for permission in Permissions.all()]
+	filetypes = list(sorted(full_extension_tree().keys()))
+	extensions = list(map(lambda ext: ".{}".format(ext), get_all_extensions()))
 
 	#~~ prepare full set of template vars for rendering
 
@@ -430,10 +476,11 @@ def _get_render_kwargs(templates, plugin_names, plugin_vars, now):
 		debug=debug,
 		firstRun=first_run,
 		version=dict(number=VERSION, display=DISPLAY_VERSION, branch=BRANCH),
-		uiApiKey=UI_API_KEY,
 		templates=templates,
 		pluginNames=plugin_names,
 		locales=locales,
+		permissions=permissions,
+		supportedFiletypes=filetypes,
 		supportedExtensions=extensions
 	)
 	render_kwargs.update(plugin_vars)
@@ -441,7 +488,14 @@ def _get_render_kwargs(templates, plugin_names, plugin_vars, now):
 	return render_kwargs
 
 
-def _process_templates():
+def fetch_template_data(refresh=False):
+	global _templates, _plugin_names, _plugin_vars
+
+	locale = g.locale.language if g.locale else "en"
+
+	if not refresh and _templates.get(locale) is not None and _plugin_names is not None and _plugin_vars is not None:
+		return _templates[locale], _plugin_names, _plugin_vars
+
 	first_run = settings().getBoolean(["server", "firstRun"])
 
 	##~~ prepare templates
@@ -466,14 +520,14 @@ def _process_templates():
 			# Ultra special case - we MUST always have the ACL wizard first since otherwise any steps that follow and
 			# that require to access APIs to function will run into errors since those APIs won't work before ACL
 			# has been configured. See also #2140
-			return u"0:{}".format(to_unicode(d[0]))
+			return "0:{}".format(to_unicode(d[0]))
 		elif d[1].get("mandatory", False):
 			# Other mandatory steps come before the optional ones
-			return u"1:{}".format(to_unicode(d[0]))
+			return "1:{}".format(to_unicode(d[0]))
 		else:
 			# Finally everything else
-			return u"2:{}".format(to_unicode(d[0]))
-	
+			return "2:{}".format(to_unicode(d[0]))
+
 	template_sorting = dict(
 		navbar=dict(add="prepend", key=None),
 		sidebar=dict(add="append", key="name"),
@@ -489,8 +543,10 @@ def _process_templates():
 	for name, hook in hooks.items():
 		try:
 			result = hook(dict(template_sorting), dict(template_rules))
-		except:
-			_logger.exception("Error while retrieving custom template type definitions from plugin {name}".format(**locals()))
+		except Exception:
+			_logger.exception("Error while retrieving custom template type "
+			                  "definitions from plugin {name}".format(**locals()),
+			                  extra=dict(plugin=name))
 		else:
 			if not isinstance(result, list):
 				continue
@@ -522,32 +578,32 @@ def _process_templates():
 
 				template_rules["plugin_" + name + "_" + key] = rule
 				template_sorting["plugin_" + name + "_" + key] = order
-	template_types = template_rules.keys()
+	template_types = list(template_rules.keys())
 
 	# navbar
 
 	templates["navbar"]["entries"] = dict(
-		settings=dict(template="navbar/settings.jinja2", _div="navbar_settings", styles=["display: none"], data_bind="visible: loginState.isAdmin"),
-		systemmenu=dict(template="navbar/systemmenu.jinja2", _div="navbar_systemmenu", styles=["display: none"], classes=["dropdown"], data_bind="visible: loginState.isAdmin", custom_bindings=False),
+		settings=dict(template="navbar/settings.jinja2", _div="navbar_settings", styles=["display: none;"], data_bind="visible: loginState.hasPermissionKo(access.permissions.SETTINGS)"),
+		systemmenu=dict(template="navbar/systemmenu.jinja2", _div="navbar_systemmenu", classes=["dropdown"], styles=["display: none;"], data_bind="visible: loginState.hasPermissionKo(access.permissions.SYSTEM)", custom_bindings=False),
 		login=dict(template="navbar/login.jinja2", _div="navbar_login", classes=["dropdown"], custom_bindings=False),
 	)
 
 	# sidebar
 
 	templates["sidebar"]["entries"]= dict(
-		connection=(gettext("Connection"), dict(template="sidebar/connection.jinja2", _div="connection", icon="signal", styles_wrapper=["display: none"], data_bind="visible: loginState.isUser")),
-		state=(gettext("State"), dict(template="sidebar/state.jinja2", _div="state", icon="info-circle")),
-		files=(gettext("Files"), dict(template="sidebar/files.jinja2", _div="files", icon="list", classes_content=["overflow_visible"], template_header="sidebar/files_header.jinja2"))
+		connection=(gettext("Connection"), dict(template="sidebar/connection.jinja2", _div="connection", icon="signal", styles_wrapper=["display: none;"], data_bind="visible: loginState.hasPermissionKo(access.permissions.CONNECTION)", template_header="sidebar/connection_header.jinja2")),
+		state=(gettext("State"), dict(template="sidebar/state.jinja2", _div="state", icon="info-circle", styles_wrapper=["display: none;"], data_bind="visible: loginState.hasPermissionKo(access.permissions.STATUS)")),
+		files=(gettext("Files"), dict(template="sidebar/files.jinja2", _div="files", icon="list", classes_content=["overflow_visible"], template_header="sidebar/files_header.jinja2", styles_wrapper=["display: none;"], data_bind="visible: loginState.hasPermissionKo(access.permissions.FILES_LIST)"))
 	)
 
 	# tabs
 
 	templates["tab"]["entries"] = dict(
-		temperature=(gettext("Temperature"), dict(template="tabs/temperature.jinja2", _div="temp")),
-		control=(gettext("Control"), dict(template="tabs/control.jinja2", _div="control")),
-		gcodeviewer=(gettext("GCode Viewer"), dict(template="tabs/gcodeviewer.jinja2", _div="gcode")),
-		terminal=(gettext("Terminal"), dict(template="tabs/terminal.jinja2", _div="term")),
-		timelapse=(gettext("Timelapse"), dict(template="tabs/timelapse.jinja2", _div="timelapse"))
+		temperature=(gettext("Temperature"), dict(template="tabs/temperature.jinja2", _div="temp", styles=["display: none;"], data_bind="visible: loginState.hasAnyPermissionKo(access.permissions.STATUS, access.permissions.CONTROL)() && visible()")),
+		control=(gettext("Control"), dict(template="tabs/control.jinja2", _div="control", styles=["display: none;"], data_bind="visible: loginState.hasAnyPermissionKo(access.permissions.WEBCAM, access.permissions.CONTROL)")),
+		gcodeviewer=(gettext("GCode Viewer"), dict(template="tabs/gcodeviewer.jinja2", _div="gcode", styles=["display: none;"], data_bind="visible: loginState.hasAllPermissionsKo(access.permissions.GCODE_VIEWER, access.permissions.FILES_DOWNLOAD)")),
+		terminal=(gettext("Terminal"), dict(template="tabs/terminal.jinja2", _div="term", styles=["display: none;"], data_bind="visible: loginState.hasPermissionKo(access.permissions.MONITOR_TERMINAL)")),
+		timelapse=(gettext("Timelapse"), dict(template="tabs/timelapse.jinja2", _div="timelapse", styles=["display: none;"], data_bind="visible: loginState.hasPermissionKo(access.permissions.TIMELAPSE_LIST)"))
 	)
 
 	# settings dialog
@@ -573,7 +629,6 @@ def _process_templates():
 		accesscontrol=(gettext("Access Control"), dict(template="dialogs/settings/accesscontrol.jinja2", _div="settings_users", custom_bindings=False)),
 		folders=(gettext("Folders"), dict(template="dialogs/settings/folders.jinja2", _div="settings_folders", custom_bindings=False)),
 		appearance=(gettext("Appearance"), dict(template="dialogs/settings/appearance.jinja2", _div="settings_appearance", custom_bindings=False)),
-		logs=(gettext("Logs"), dict(template="dialogs/settings/logs.jinja2", _div="settings_logs")),
 		server=(gettext("Server"), dict(template="dialogs/settings/server.jinja2", _div="settings_server", custom_bindings=False)),
 	)
 
@@ -608,7 +663,6 @@ def _process_templates():
 		license=("OctoPrint License", dict(template="dialogs/about/license.jinja2", _div="about_license", custom_bindings=False)),
 		thirdparty=("Third Party Licenses", dict(template="dialogs/about/thirdparty.jinja2", _div="about_thirdparty", custom_bindings=False)),
 		authors=("Authors", dict(template="dialogs/about/authors.jinja2", _div="about_authors", custom_bindings=False)),
-		changelog=("Changelog", dict(template="dialogs/about/changelog.jinja2", _div="about_changelog", custom_bindings=False)),
 		supporters=("Supporters", dict(template="dialogs/about/supporters.jinja2", _div="about_sponsors", custom_bindings=False))
 	)
 
@@ -631,8 +685,9 @@ def _process_templates():
 			if isinstance(implementation, octoprint.plugin.WizardPlugin):
 				wizard_required = implementation.is_wizard_required()
 				wizard_ignored = octoprint.plugin.WizardPlugin.is_wizard_ignored(seen_wizards, implementation)
-		except:
-			_logger.exception("Error while retrieving template data for plugin {}, ignoring it".format(name))
+		except Exception:
+			_logger.exception("Error while retrieving template data for plugin {}, ignoring it".format(name),
+			                  extra=dict(plugin=name))
 			continue
 
 		if not isinstance(vars, dict):
@@ -706,7 +761,7 @@ def _process_templates():
 					def f(x, k):
 						try:
 							return extractor(x, k)
-						except:
+						except Exception:
 							_logger.exception("Error while extracting sorting keys for template {}".format(t))
 							return None
 					return f
@@ -717,14 +772,14 @@ def _process_templates():
 			def key_func(x):
 				config = templates[t]["entries"][x]
 				entry_order = config_extractor(config, "order", default_value=None)
-				return entry_order is None, entry_order, extractor(config, sort_key)
+				return entry_order is None, sv(entry_order), sv(extractor(config, sort_key))
 
 			sorted_missing = sorted(missing_in_order, key=key_func)
 		else:
 			def key_func(x):
 				config = templates[t]["entries"][x]
 				entry_order = config_extractor(config, "order", default_value=None)
-				return entry_order is None, entry_order
+				return entry_order is None, sv(entry_order)
 
 			sorted_missing = sorted(missing_in_order, key=key_func)
 
@@ -741,6 +796,10 @@ def _process_templates():
 		elif template_sorting[t]["add"] == "custom_insert" and "custom_insert_entries" in template_sorting[t] and "custom_insert_order" in template_sorting[t]:
 			templates[t]["entries"].update(template_sorting[t]["custom_insert_entries"](sorted_missing))
 			templates[t]["order"] = template_sorting[t]["custom_insert_order"](templates[t]["order"], sorted_missing)
+
+	_templates[locale] = templates
+	_plugin_names = plugin_names
+	_plugin_vars = plugin_vars
 
 	return templates, plugin_names, plugin_vars
 
@@ -781,7 +840,7 @@ def _process_template_configs(name, implementation, configs, rules):
 					app.jinja_env.get_or_select_template(data["template"])
 				except TemplateNotFound:
 					pass
-				except:
+				except Exception:
 					_logger.exception("Error in template {}, not going to include it".format(data["template"]))
 				else:
 					includes[template_type].append(rule["to_entry"](data))
@@ -809,7 +868,7 @@ def _process_template_config(name, implementation, rule, config=None, counter=1)
 		if "suffix" in data:
 			data["_div"] = data["_div"] + data["suffix"]
 		if not _valid_div_re.match(data["_div"]):
-			_logger.warn("Template config {} contains invalid div identifier {}, skipping it".format(name, data["_div"]))
+			_logger.warning("Template config {} contains invalid div identifier {}, skipping it".format(name, data["_div"]))
 			return None
 
 	if not "template" in data:
@@ -829,6 +888,8 @@ def _process_template_config(name, implementation, rule, config=None, counter=1)
 	if "suffix" in data:
 		data["_key"] += data["suffix"]
 
+	data["_plugin"] = name
+
 	return data
 
 
@@ -839,8 +900,8 @@ def _filter_templates(templates, template_filter):
 		for template_key, template_entry in template_collection["entries"].items():
 			if template_filter(template_type, template_key):
 				filtered_entries[template_key] = template_entry
-		filtered_templates[template_type] = dict(order=filter(lambda x: x in filtered_entries,
-		                                                      template_collection["order"]),
+		filtered_templates[template_type] = dict(order=list(filter(lambda x: x in filtered_entries,
+		                                                      	   template_collection["order"])),
 		                                         entries=filtered_entries)
 	return filtered_templates
 
@@ -889,9 +950,11 @@ def _compute_etag_for_i18n(locale, domain, files=None, lastmodified=None):
 
 	import hashlib
 	hash = hashlib.sha1()
-	hash.update(",".join(sorted(files)))
+	def hash_update(value):
+		hash.update(value.encode('utf-8'))
+	hash_update(",".join(sorted(files)))
 	if lastmodified:
-		hash.update(lastmodified)
+		hash_update(lastmodified)
 	return hash.hexdigest()
 
 
@@ -901,7 +964,7 @@ def _compute_date_for_i18n(locale, domain):
 
 def _compute_date(files):
 	from datetime import datetime
-	timestamps = map(lambda path: os.stat(path).st_mtime, files) + [0] if files else []
+	timestamps = list(map(lambda path: os.stat(path).st_mtime, files)) + [0] if files else []
 	max_timestamp = max(*timestamps) if timestamps else None
 	if max_timestamp:
 		# we set the micros to 0 since microseconds are not speced for HTTP
@@ -947,7 +1010,7 @@ def _get_all_translationfiles(locale, domain):
 
 	po_files = []
 
-	user_base_path = os.path.join(settings().getBaseFolder("translations"))
+	user_base_path = os.path.join(settings().getBaseFolder("translations", check_writable=False))
 	user_plugin_path = os.path.join(user_base_path, "_plugins")
 
 	# plugin translations
@@ -986,7 +1049,7 @@ def _get_translations(locale, domain):
 
 	def messages_from_po(path, locale, domain):
 		messages = dict()
-		with codecs.open(path, encoding="utf-8") as f:
+		with io.open(path, mode="rt", encoding="utf-8") as f:
 			catalog = read_po(f, locale=locale, domain=domain)
 
 			for message in catalog:

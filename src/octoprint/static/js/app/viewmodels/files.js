@@ -7,7 +7,9 @@ $(function() {
         self.printerState = parameters[2];
         self.slicing = parameters[3];
         self.printerProfiles=parameters[4];
+        self.access = parameters[5];
 
+        self.filesListVisible = ko.observable(true);
         self.isErrorOrClosed = ko.observable(undefined);
         self.isOperational = ko.observable(undefined);
         self.isPrinting = ko.observable(undefined);
@@ -76,8 +78,7 @@ $(function() {
         self.addFolderDialog = undefined;
         self.addFolderName = ko.observable(undefined);
         self.enableAddFolder = ko.pureComputed(function() {
-            return self.loginState.isUser() && self.addFolderName() && self.addFolderName().trim() !== ""
-                && !self.addingFolder();
+            return self.loginState.hasPermission(self.access.permissions.FILES_UPLOAD) && self.addFolderName() && self.addFolderName().trim() !== "" && !self.addingFolder();
         });
 
         self.allItems = ko.observable(undefined);
@@ -86,6 +87,29 @@ $(function() {
         self.uploadProgressText = ko.observable();
 
         // initialize list helper
+        var listHelperFilters = {
+            "printed": function(data) {
+                return !(data["prints"] && data["prints"]["success"] && data["prints"]["success"] > 0)
+                    || (data["type"] && data["type"] === "folder");
+            },
+            "sd": function(data) {
+                return data["origin"] && data["origin"] === "sdcard";
+            },
+            "local": function(data) {
+                return !(data["origin"] && data["origin"] === "sdcard");
+            }
+        };
+        var listHelperExclusiveFilters = [["sd", "local"]];
+
+        if (SUPPORTED_FILETYPES.length > 1) {
+            _.each(SUPPORTED_FILETYPES, function(filetype) {
+                listHelperFilters[filetype] = function(data) {
+                    return data["type"] && (data["type"] === filetype || data["type"] === "folder");
+                }
+            });
+            listHelperExclusiveFilters.push(SUPPORTED_FILETYPES);
+        }
+
         self.listHelper = new ItemListHelper(
             "gcodeFiles",
             {
@@ -98,39 +122,40 @@ $(function() {
                 "upload": function(a, b) {
                     // sorts descending
                     if (b["date"] === undefined || a["date"] > b["date"]) return -1;
-                    if (a["date"] < b["date"]) return 1;
+                    if (a["date"] === undefined || a["date"] < b["date"]) return 1;
                     return 0;
                 },
                 "size": function(a, b) {
                     // sorts descending
                     if (b["size"] === undefined || a["size"] > b["size"]) return -1;
-                    if (a["size"] < b["size"]) return 1;
+                    if (a["size"] === undefined || a["size"] < b["size"]) return 1;
                     return 0;
                 }
             },
-            {
-                "printed": function(data) {
-                    return !(data["prints"] && data["prints"]["success"] && data["prints"]["success"] > 0)
-                        || (data["type"] && data["type"] === "folder");
-                },
-                "sd": function(data) {
-                    return data["origin"] && data["origin"] === "sdcard";
-                },
-                "local": function(data) {
-                    return !(data["origin"] && data["origin"] === "sdcard");
-                },
-                "machinecode": function(data) {
-                    return data["type"] && (data["type"] === "machinecode" || data["type"] === "folder");
-                },
-                "model": function(data) {
-                    return data["type"] && (data["type"] === "model" || data["type"] === "folder");
-                }
-            },
+            listHelperFilters,
             "name",
             [],
-            [["sd", "local"], ["machinecode", "model"]],
+            listHelperExclusiveFilters,
             0
         );
+
+        self.availableFiletypes = ko.pureComputed(function() {
+            var mapping = {
+                model: gettext("Only show model files"),
+                machinecode: gettext("Only show machine code files")
+            };
+
+            var result = [];
+            _.each(SUPPORTED_FILETYPES, function(filetype) {
+                if (mapping[filetype]) {
+                    result.push({key: filetype, text: mapping[filetype]});
+                } else {
+                    result.push({key: filetype, text: _.sprintf(gettext("Only show %(type)s files"), {type: _.escape(filetype)})});
+                }
+            });
+
+            return result;
+        });
 
         self.foldersOnlyList = ko.dependentObservable(function() {
             var filter = function(data) { return data["type"] && data["type"] === "folder"; };
@@ -159,11 +184,11 @@ $(function() {
         });
 
         self.isLoadActionPossible = ko.pureComputed(function() {
-            return self.loginState.isUser() && !self.isPrinting() && !self.isPaused() && !self.isLoading();
+            return self.loginState.hasPermission(self.access.permissions.FILES_SELECT) && self.isOperational() && !self.isPrinting() && !self.isPaused() && !self.isLoading();
         });
 
         self.isLoadAndPrintActionPossible = ko.pureComputed(function() {
-            return self.loginState.isUser() && self.isOperational() && self.isLoadActionPossible();
+            return self.loginState.hasPermission(self.access.permissions.PRINT) && self.isOperational() && self.isLoadActionPossible();
         });
 
         self.printerState.filepath.subscribe(function(newValue) {
@@ -175,7 +200,7 @@ $(function() {
         };
 
         self.highlightFilename = function(filename) {
-            if (filename === undefined) {
+            if (filename === undefined || filename === null) {
                 self.listHelper.selectNone();
             } else {
                 self.listHelper.selectItem(function(item) {
@@ -211,6 +236,10 @@ $(function() {
         self._focus = undefined;
         self._switchToPath = undefined;
         self.requestData = function(params) {
+            if (!self.loginState.hasPermission(self.access.permissions.FILES_LIST)) {
+                return;
+            }
+
             var focus, switchToPath, force;
 
             if (_.isObject(params)) {
@@ -246,6 +275,10 @@ $(function() {
                 .done(function(response) {
                     self.fromResponse(response, {focus: self._focus, switchToPath: self._switchToPath});
                 })
+                .fail(function() {
+                    self.allItems(undefined);
+                    self.listHelper.updateItems([]);
+                })
                 .always(function() {
                     self._otherRequestInProgress = undefined;
                     self._focus = undefined;
@@ -276,6 +309,20 @@ $(function() {
 
             self.allItems(files);
 
+            // Sanity check file list - see #2572
+            var nonrecursive = false;
+            _.each(files, function(file) {
+                if (file.type === "folder" && file.children === undefined) {
+                    nonrecursive = true;
+                }
+            });
+            if (nonrecursive) {
+                log.error("At least one folder doesn't have a 'children' element defined. That means the file list request " +
+                    "wasn't actually made with 'recursive=true' in the query.\n\n" +
+                    "This can happen on wrong reverse proxy configs that " +
+                    "swallow up query parameters, see https://github.com/foosel/OctoPrint/issues/2572");
+            }
+
             if (!switchToPath) {
                 var currentPath = self.currentPath();
                 if (currentPath === undefined) {
@@ -294,11 +341,9 @@ $(function() {
                 var entryElement = self.getEntryElement({path: focus.path, origin: focus.location});
                 if (entryElement) {
                     // scroll to uploaded element
-                    var entryOffset = entryElement.offsetTop;
+                    // todo iratxe: check we don't need this
                     // disabled as it resizes the div.
-			//self.listElement.slimScroll({
-                    	//    scrollTo: entryOffset + "px"
-                    	//});
+                    self.listElement.scrollTop(entryElement.offsetTop);
 
                     // highlight uploaded element
                     var element = $(entryElement);
@@ -322,6 +367,11 @@ $(function() {
         };
 
         self.changeFolder = function(data) {
+            if (data.children === undefined) {
+                log.error("Can't switch to folder '" + data.path + "', no children available");
+                return;
+            }
+
             self.currentPath(data.path);
             self.listHelper.updateItems(data.children);
             self.highlightCurrentFilename();
@@ -346,6 +396,8 @@ $(function() {
         };
 
         self.showAddFolderDialog = function() {
+            if (!self.loginState.hasPermission(self.access.permissions.FILES_UPLOAD)) return;
+
             if (self.addFolderDialog) {
                 self.addFolderName("");
                 self.addFolderDialog.modal("show");
@@ -353,6 +405,8 @@ $(function() {
         };
 
         self.addFolder = function() {
+            if (!self.loginState.hasPermission(self.access.permissions.FILES_UPLOAD)) return;
+
             var name = self.addFolderName();
 
             // "local" only for now since we only support local and sdcard,
@@ -385,6 +439,8 @@ $(function() {
         };
 
         self.removeFolder = function(folder, event) {
+            if (!self.loginState.hasPermission(self.access.permissions.FILES_DELETE)) return;
+
             if (!folder) {
                 return;
             }
@@ -396,7 +452,7 @@ $(function() {
             if (folder.weight > 0) {
                 // confirm recursive delete
                 var options = {
-                    message: _.sprintf(gettext("You are about to delete the folder \"%(folder)s\" which still contains files and/or sub folders."), {folder: folder.name}),
+                    message: _.sprintf(gettext("You are about to delete the folder \"%(folder)s\" which still contains files and/or sub folders."), {folder: _.escape(folder.name)}),
                     onproceed: function() {
                         self._removeEntry(folder, event);
                     }
@@ -408,6 +464,8 @@ $(function() {
         };
 
         self.loadFile = function(data, printAfterLoad) {
+            if (!self.loginState.hasPermission(self.access.permissions.FILES_SELECT)) return;
+
             if (!data) {
                 return;
             }
@@ -420,11 +478,26 @@ $(function() {
                 var withinPrintDimensions = self.evaluatePrintDimensions(data, true);
                 var print = printAfterLoad && withinPrintDimensions;
 
-                OctoPrint.files.select(data.origin, data.path, print);
+                if (print && self.settingsViewModel.feature_printStartConfirmation()) {
+                    showConfirmationDialog({
+                        message: gettext("This will start a new print job. Please check that the print bed is clear."),
+                        question: gettext("Do you want to start the print job now?"),
+                        cancel: gettext("No"),
+                        proceed: gettext("Yes"),
+                        onproceed: function() {
+                            OctoPrint.files.select(data.origin, data.path, print);
+                        },
+                        nofade: true
+                    });
+                } else {
+                    OctoPrint.files.select(data.origin, data.path, print);
+                }
             }
         };
 
         self.removeFile = function(file, event) {
+            if (!self.loginState.hasPermission(self.access.permissions.FILES_DELETE)) return;
+
             if (!file) {
                 return;
             }
@@ -437,6 +510,8 @@ $(function() {
         };
 
         self.sliceFile = function(file) {
+            if (!self.loginState.hasPermission(self.access.permissions.SLICE)) return;
+
             if (!file) {
                 return;
             }
@@ -445,14 +520,17 @@ $(function() {
         };
 
         self.initSdCard = function() {
+            if (!self.loginState.hasPermission(self.access.permissions.CONTROL)) return;
             OctoPrint.printer.initSd();
         };
 
         self.releaseSdCard = function() {
+            if (!self.loginState.hasPermission(self.access.permissions.CONTROL)) return;
             OctoPrint.printer.releaseSd();
         };
 
         self.refreshSdFiles = function() {
+            if (!self.loginState.hasPermission(self.access.permissions.CONTROL)) return;
             OctoPrint.printer.refreshSd();
         };
 
@@ -560,19 +638,25 @@ $(function() {
             } else {
                 busy = _.contains(self.printerState.busyFiles(), data.origin + ":" + data.path);
             }
-            return self.loginState.isUser() && !busy;
+            return self.loginState.hasPermission(self.access.permissions.FILES_DELETE) && !busy;
         };
 
-        self.enableSelect = function(data, printAfterSelect) {
-            return self.enablePrint(data) && !self.listHelper.isSelected(data);
+        self.enableSelect = function(data) {
+            return self.isLoadAndPrintActionPossible() && !self.listHelper.isSelected(data);
         };
 
         self.enablePrint = function(data) {
-            return self.loginState.isUser() && self.isOperational() && !(self.isPrinting() || self.isPaused() || self.isLoading());
+            return self.loginState.hasPermission(self.access.permissions.PRINT) && self.isOperational() && !(self.isPrinting() || self.isPaused() || self.isLoading());
         };
 
+        self.enableSelectAndPrint = function(data, printAfterSelect) {
+            var isLoadAndPrintActionPossible = self.isLoadAndPrintActionPossible();
+            return isLoadAndPrintActionPossible && !self.listHelper.isSelected(data);
+        };
+
+
         self.enableSlicing = function(data) {
-            return self.loginState.isUser() && self.slicing.enableSlicingDialog() && self.slicing.enableSlicingDialogForFile(data.name);
+            return self.loginState.hasPermission(self.access.permissions.SLICE) && self.slicing.enableSlicingDialog() && self.slicing.enableSlicingDialogForFile(data.name);
         };
 
         self.enableAdditionalData = function(data) {
@@ -609,7 +693,7 @@ $(function() {
                         });
                     }
                 }
-                output += gettext("Estimated print time") + ": " + formatFuzzyPrintTime(data["gcodeAnalysis"]["estimatedPrintTime"]) + "<br>";
+                output += gettext("Estimated print time") + ": " + (self.settingsViewModel.appearance_fuzzyTimes() ? formatFuzzyPrintTime(data["gcodeAnalysis"]["estimatedPrintTime"]) : formatDuration(data["gcodeAnalysis"]["estimatedPrintTime"])) + "<br>";
             }
             if (data["prints"] && data["prints"]["last"]) {
                 output += gettext("Last printed") + ": " + formatTimeAgo(data["prints"]["last"]["date"]) + "<br>";
@@ -674,7 +758,7 @@ $(function() {
             }
 
             // model not within bounds, we need to prepare a warning
-            var warning = "<p>" + _.sprintf(gettext("Object in %(name)s exceeds the print volume of the currently selected printer profile, be careful when printing this."), data) + "</p>";
+            var warning = "<p>" + _.sprintf(gettext("Object in %(name)s exceeds the print volume of the currently selected printer profile, be careful when printing this."), {name: _.escape(data.name)}) + "</p>";
             var info = "";
 
             var formatData = {
@@ -717,6 +801,10 @@ $(function() {
             }
         };
 
+        self.clearSearchQuery = function() {
+            self.searchQuery("");
+        };
+
         self.performSearch = function(e) {
             var query = self.searchQuery();
             if (query !== undefined && query.trim() !== "") {
@@ -751,7 +839,7 @@ $(function() {
                     return element;
                 }
 
-                if (!element.hasOwnProperty("children")) {
+                if (!element.hasOwnProperty("children") || !element.children) {
                     return undefined;
                 }
 
@@ -768,18 +856,23 @@ $(function() {
             return recursiveSearch(path.split("/"), root);
         };
 
-        self.onUserLoggedIn = function(user) {
-            self.uploadButton.fileupload("enable");
-            if (self.uploadSdButton) {
-                self.uploadSdButton.fileupload("enable");
+        self.updateButtons = function() {
+            if (self.loginState.hasPermission(self.access.permissions.FILES_UPLOAD)) {
+                self.uploadButton.fileupload("enable");
+                if (self.uploadSdButton) {
+                    self.uploadSdButton.fileupload("enable");
+                }
+            } else {
+                self.uploadButton.fileupload("disable");
+                if (self.uploadSdButton) {
+                    self.uploadSdButton.fileupload("disable");
+                }
             }
         };
 
-        self.onUserLoggedOut = function() {
-            self.uploadButton.fileupload("disable");
-            if (self.uploadSdButton) {
-                self.uploadSdButton.fileupload("disable");
-            }
+        self.onUserPermissionsChanged = self.onUserLoggedIn = self.onUserLoggedOut = function() {
+            self.updateButtons();
+            self.requestData();
         };
 
         self.onStartup = function() {
@@ -787,14 +880,16 @@ $(function() {
                 var files = $("#files");
                 if (files.hasClass("in")) {
                     files.removeClass("overflow_visible");
+                    self.filesListVisible(false);
                 } else {
                     setTimeout(function() {
                         files.addClass("overflow_visible");
+                        self.filesListVisible(true);
                     }, 100);
                 }
             });
 
-            self.listElement = $(".gcode_files");
+            self.listElement = $("#files").find(".scroll-wrapper");
 
             self.addFolderDialog = $("#add_folder_dialog");
             self.addFolderDialog.on("shown", function() {
@@ -837,18 +932,16 @@ $(function() {
             self.dropOverlay.on('drop', self._forceEndDragNDrop);
 
             function evaluateDropzones() {
-                var enableLocal = self.loginState.isUser();
+                var enableLocal = self.loginState.hasPermission(self.access.permissions.FILES_UPLOAD);
                 var enableSd = enableLocal && CONFIG_SD_SUPPORT && self.printerState.isSdReady() && !self.isPrinting();
 
                 self._setDropzone("local", enableLocal);
                 self._setDropzone("sdcard", enableSd);
             }
-            self.loginState.isUser.subscribe(evaluateDropzones);
+            self.loginState.currentUser.subscribe(evaluateDropzones);
             self.printerState.isSdReady.subscribe(evaluateDropzones);
             self.isPrinting.subscribe(evaluateDropzones);
             evaluateDropzones();
-
-            self.requestData();
         };
 
         self.onEventUpdatedFiles = function(payload) {
@@ -856,7 +949,7 @@ $(function() {
                 return;
             }
 
-            if (payload.type !== "gcode") {
+            if (payload.type !== "printables") {
                 return;
             }
 
@@ -898,7 +991,7 @@ $(function() {
 
             new PNotify({
                 title: gettext("Slicing done"),
-                text: _.sprintf(gettext("Sliced %(stl)s to %(gcode)s, took %(time).2f seconds"), payload),
+                text: _.sprintf(gettext("Sliced %(stl)s to %(gcode)s, took %(time).2f seconds"), {stl: _.escape(payload.stl), gcode: _.escape(payload.gcode), time: payload.time}),
                 type: "success"
             });
 
@@ -913,7 +1006,7 @@ $(function() {
                 .css("width", "0%");
             self.uploadProgressText("");
 
-            var html = _.sprintf(gettext("Could not slice %(stl)s to %(gcode)s: %(reason)s"), payload);
+            var html = _.sprintf(gettext("Could not slice %(stl)s to %(gcode)s: %(reason)s"), {stl: _.escape(payload.stl), gcode: _.escape(payload.gcode), reason: _.escape(payload.reason)});
             new PNotify({title: gettext("Slicing failed"), text: html, type: "error", hide: false});
         };
 
@@ -944,7 +1037,7 @@ $(function() {
 
             new PNotify({
                 title: gettext("Streaming done"),
-                text: _.sprintf(gettext("Streamed %(local)s to %(remote)s on SD, took %(time).2f seconds"), payload),
+                text: _.sprintf(gettext("Streamed %(local)s to %(remote)s on SD, took %(time).2f seconds"), {local: _.escape(payload.local), remote: _.escape(payload.remote), time: payload.time}),
                 type: "success"
             });
 
@@ -961,7 +1054,7 @@ $(function() {
 
             new PNotify({
                 title: gettext("Streaming failed"),
-                text: _.sprintf(gettext("Did not finish streaming %(local)s to %(remote)s on SD"), payload),
+                text: _.sprintf(gettext("Did not finish streaming %(local)s to %(remote)s on SD"), {local: _.escape(payload.local), remote: _.escape(payload.remote)}),
                 type: "error"
             });
 
@@ -1061,10 +1154,12 @@ $(function() {
             }).sort();
             extensions = extensions.join(", ");
             var error = "<p>"
-                + _.sprintf(gettext("Could not upload the file. Make sure that it is a valid file with one of these extensions: %(extensions)s"),
-                            {extensions: extensions})
+                + _.sprintf(gettext("Could not upload the file. Make sure that it is a readable, valid file with one of these extensions: %(extensions)s"),
+                            {extensions: _.escape(extensions)})
                 + "</p>";
-            error += pnotifyAdditionalInfo("<pre>" + data.jqXHR.responseText + "</pre>");
+            if (data.jqXHR.responseText) {
+                error += pnotifyAdditionalInfo("<pre>" + _.escape(data.jqXHR.responseText) + "</pre>");
+            }
             new PNotify({
                 title: "Upload failed",
                 text: error,
@@ -1171,7 +1266,7 @@ $(function() {
         construct: FilesViewModel,
         name: "filesViewModel",
         additionalNames: ["gcodeFilesViewModel"],
-        dependencies: ["settingsViewModel", "loginStateViewModel", "printerStateViewModel", "slicingViewModel", "printerProfilesViewModel"],
+        dependencies: ["settingsViewModel", "loginStateViewModel", "printerStateViewModel", "slicingViewModel", "printerProfilesViewModel", "accessViewModel"],
         elements: ["#files_wrapper", "#add_folder_dialog"]
     });
 });

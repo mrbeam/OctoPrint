@@ -1,4 +1,6 @@
-# coding=utf-8
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 """
 This module bundles all of OctoPrint's supported plugin implementation types as well as their common parent
 class, :class:`OctoPrintPlugin`.
@@ -16,17 +18,12 @@ Please note that the plugin implementation types are documented in the section
 
 """
 
-from __future__ import absolute_import, division, print_function
-
 __author__ = "Gina Häußge <osd@foosel.net>"
 __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agpl.html'
 __copyright__ = "Copyright (C) 2014 The OctoPrint Project - Released under terms of the AGPLv3 License"
 
 
 from .core import (Plugin, RestartNeedingPlugin, SortablePlugin)
-
-# noinspection PyCompatibility
-from past.builtins import basestring
 
 class OctoPrintPlugin(Plugin):
 	"""
@@ -69,7 +66,7 @@ class OctoPrintPlugin(Plugin):
 
 	.. attribute:: _app_session_manager
 
-	   The :class:`~octoprint.users.SessionManager` instance. Injected by the plugin core system upon initialization of
+	   The :class:`~octoprint.access.users.SessionManager` instance. Injected by the plugin core system upon initialization of
 	   the implementation.
 
 	.. attribute:: _plugin_lifecycle_manager
@@ -79,7 +76,7 @@ class OctoPrintPlugin(Plugin):
 
 	.. attribute:: _user_manager
 
-	   The :class:`~octoprint.users.UserManager` instance. Injected by the plugin core system upon initialization
+	   The :class:`~octoprint.access.users.UserManager` instance. Injected by the plugin core system upon initialization
 	   of the implementation.
 
 	.. attribute:: _connectivity_checker
@@ -159,6 +156,10 @@ class StartupPlugin(OctoPrintPlugin, SortablePlugin):
 		is not actually up yet and none of your plugin's APIs or blueprints will be reachable yet. If you need to be
 		externally reachable, use :func:`on_after_startup` instead or additionally.
 
+		.. warning::
+
+		   Do not perform long-running or even blocking operations in your implementation or you **will** block and break the server.
+
 		The relevant sorting context is ``StartupPlugin.on_startup``.
 
 		:param string host: the host the server will listen on, may be ``0.0.0.0``
@@ -170,6 +171,10 @@ class StartupPlugin(OctoPrintPlugin, SortablePlugin):
 	def on_after_startup(self):
 		"""
 		Called just after launch of the server, so when the listen loop is actually running already.
+
+		.. warning::
+
+		   Do not perform long-running or even blocking operations in your implementation or you **will** block and break the server.
 
 		The relevant sorting context is ``StartupPlugin.on_after_startup``.
 		"""
@@ -190,6 +195,10 @@ class ShutdownPlugin(OctoPrintPlugin, SortablePlugin):
 	def on_shutdown(self):
 		"""
 		Called upon the imminent shutdown of OctoPrint.
+
+		.. warning::
+
+		   Do not perform long-running or even blocking operations in your implementation or you **will** block and break the server.
 
 		The relevant sorting context is ``ShutdownPlugin.on_shutdown``.
 		"""
@@ -225,6 +234,8 @@ class AssetPlugin(OctoPrintPlugin, RestartNeedingPlugin):
 
 		js
 		   JavaScript files, such as additional view models
+		jsclient
+		   JavaScript files containing additional parts for the JS Client Library (since 1.3.10)
 		css
 		   CSS files with additional styles, will be embedded into delivered pages when not running in LESS mode.
 		less
@@ -239,6 +250,7 @@ class AssetPlugin(OctoPrintPlugin, RestartNeedingPlugin):
 		   def get_assets(self):
 		       return dict(
 		           js=['js/my_file.js', 'js/my_other_file.js'],
+		           clientjs=['clientjs/my_file.js'],
 		           css=['css/my_styles.css'],
 		           less=['less/my_styles.less']
 		        )
@@ -782,7 +794,7 @@ class UiPlugin(OctoPrintPlugin, SortablePlugin):
 	def get_ui_custom_etag(self):
 		"""
 		Allows to use a custom way to calculate the ETag, instead of the default method (hashing
-		OctoPrint's version, current ``UI_API_KEY``, tracked file paths and ``LastModified`` value).
+		OctoPrint's version, tracked file paths and ``LastModified`` value).
 
 		Returns:
 		    str: An alternatively calculated ETag value. Ignored if ``None`` is returned (default).
@@ -1379,8 +1391,12 @@ class BlueprintPlugin(OctoPrintPlugin, RestartNeedingPlugin):
 	# noinspection PyMethodMayBeStatic
 	def is_blueprint_protected(self):
 		"""
-		Whether a valid API key is needed to access the blueprint (the default) or not. Note that this only restricts
-		access to the blueprint's dynamic methods, static files are always accessible without API key.
+		Whether a login session by a registered user is needed to access the blueprint's endpoints. Requiring
+		a session is the default. Note that this only restricts access to the blueprint's dynamic methods, static files
+		are always accessible.
+
+		If you want your blueprint's endpoints to have specific permissions, return ``False`` for this and do your
+		permissions checks explicitly.
 		"""
 
 		return True
@@ -1443,7 +1459,7 @@ class SettingsPlugin(OctoPrintPlugin):
 
 	   Make sure to protect sensitive information stored by your plugin that only logged in administrators (or users)
 	   should have access to via :meth:`~octoprint.plugin.SettingsPlugin.get_settings_restricted_paths`. OctoPrint will
-	   return its settings on the REST API even to anonymous clients, but will filter out fields it know are restricted,
+	   return its settings on the REST API even to anonymous clients, but will filter out fields it knows are restricted,
 	   therefore you **must** make sure that you specify sensitive information accordingly to limit access as required!
 	"""
 
@@ -1481,8 +1497,10 @@ class SettingsPlugin(OctoPrintPlugin):
 
 		:return: the current settings of the plugin, as a dictionary
 		"""
-		from flask.ext.login import current_user
+		from flask_login import current_user
 		import copy
+
+		from octoprint.access.permissions import Permissions
 
 		data = copy.deepcopy(self._settings.get_all_data(merged=True))
 		if self.config_version_key in data:
@@ -1527,8 +1545,8 @@ class SettingsPlugin(OctoPrintPlugin):
 					else:
 						node[key] = None
 
-		conditions = dict(user=lambda: current_user is not None and not current_user.is_anonymous(),
-		                  admin=lambda: current_user is not None and not current_user.is_anonymous() and current_user.is_admin(),
+		conditions = dict(user=lambda: current_user is not None and not current_user.is_anonymous,
+		                  admin=lambda: current_user is not None and current_user.has_permission(Permissions.SETTINGS),
 		                  never=lambda: False)
 
 		for level, condition in conditions.items():
@@ -1604,8 +1622,8 @@ class SettingsPlugin(OctoPrintPlugin):
 		"""
 		Retrieves the list of paths in the plugin's settings which be restricted on the REST API.
 
-		Override this in your plugin's implementation to restrict whether a path should only be returned to logged in
-		users & admins, only to admins, or never on the REST API.
+		Override this in your plugin's implementation to restrict whether a path should only be returned to users with
+		the SETTINGS permission, any logged in users, or never on the REST API.
 
 		Return a ``dict`` with the keys ``admin``, ``user``, ``never`` mapping to a list of paths (as tuples or lists of
 		the path elements) for which to restrict access via the REST API accordingly. Paths returned for the ``admin``
@@ -1799,6 +1817,10 @@ class EventHandlerPlugin(OctoPrintPlugin):
 		"""
 		Called by OctoPrint upon processing of a fired event on the platform.
 
+		.. warning::
+
+		   Do not perform long-running or even blocking operations in your implementation or you **will** block and break the server.
+
 		Arguments:
 		    event (str): The type of event that got fired, see :ref:`the list of events <sec-events-available_events>`
 		        for possible values
@@ -1837,8 +1859,9 @@ class SlicerPlugin(OctoPrintPlugin):
 		    The human readable name of the slicer. This will be displayed to the user during slicer selection.
 		same_device
 		    True if the slicer runs on the same device as OctoPrint, False otherwise. Slicers running on the same
-		    device will not be allowed to slice while a print is running due to performance reasons. Slice requests
-		    against slicers running on the same device will result in an error.
+		    device will not be allowed to slice on systems with less than two CPU cores (or an unknown number) while a
+		    print is running due to performance reasons. Slice requests against slicers running on the same device and
+		    less than two cores will result in an error.
 		progress_report
 		    ``True`` if the slicer can report back slicing progress to OctoPrint ``False`` otherwise.
 		source_file_types
@@ -1860,6 +1883,62 @@ class SlicerPlugin(OctoPrintPlugin):
 			source_file_types=["model"],
 			destination_extensions=["gco", "gcode", "g"]
 		)
+
+	# noinspection PyMethodMayBeStatic
+	def get_slicer_extension_tree(self):
+		"""
+		Fetch additional entries to put into the extension tree for accepted files
+
+		By default, a subtree for ``model`` files with ``stl`` extension is returned. Slicers who want to support
+		additional/other file types will want to override this.
+
+		For the extension tree format, take a look at the docs of the :ref:`octoprint.filemanager.extension_tree hook <sec-plugins-hook-filemanager-extensiontree>`.
+
+		Returns: (dict) a dictionary containing a valid extension subtree.
+		"""
+		from octoprint.filemanager import ContentTypeMapping
+		return dict(model=dict(stl=ContentTypeMapping(["stl"], "application/sla")))
+
+	def get_slicer_profiles(self, profile_path):
+		"""
+		Fetch all :class:`~octoprint.slicing.SlicingProfile` stored for this slicer.
+
+		For compatibility reasons with existing slicing plugins this method defaults to returning profiles parsed from
+		.profile files in the plugin's ``profile_path``, utilizing the :func:`SlicingPlugin.get_slicer_profile` method
+		of the plugin implementation.
+
+		Arguments:
+		    profile_path (str): The base folder where OctoPrint stores this slicer plugin's profiles
+		"""
+
+		try:
+			from os import scandir
+		except ImportError:
+			from scandir import scandir
+
+		import octoprint.util
+
+		profiles = dict()
+		for entry in scandir(profile_path):
+			if not entry.name.endswith(".profile") or octoprint.util.is_hidden_path(entry.name):
+				# we are only interested in profiles and no hidden files
+				continue
+
+			profile_name = entry.name[:-len(".profile")]
+			profiles[profile_name] = self.get_slicer_profile(entry.path)
+		return profiles
+
+	# noinspection PyMethodMayBeStatic
+	def get_slicer_profiles_lastmodified(self, profile_path):
+		import os
+		try:
+			from os import scandir
+		except ImportError:
+			from scandir import scandir
+
+		lms = [os.stat(profile_path).st_mtime]
+		lms += [os.stat(entry.path).st_mtime for entry in scandir(profile_path) if entry.name.endswith(".profile")]
+		return max(lms)
 
 	# noinspection PyMethodMayBeStatic
 	def get_slicer_default_profile(self):
@@ -1943,7 +2022,7 @@ class SlicerPlugin(OctoPrintPlugin):
 		For jobs that finished successfully, ``result`` should be a :class:`dict` containing additional information
 		about the slicing job under the following keys:
 
-		_analysis
+		analysis
 		    Analysis result of the generated machine code as returned by the slicer itself. This should match the
 		    data structure described for the analysis queue of the matching machine code format, e.g.
 		    :class:`~octoprint.filemanager.analysis.GcodeAnalysisQueue` for GCODE files.
@@ -2002,20 +2081,3 @@ class ProgressPlugin(OctoPrintPlugin):
 		:param int progress:                Current progress as a value between 0 and 100
 		"""
 		pass
-
-
-class AppPlugin(OctoPrintPlugin):
-	"""
-	Using the :class:`AppPlugin mixin` plugins may register additional :ref:`App session key providers <sec-api-apps-sessionkey>`
-	within the system.
-
-	.. deprecated:: 1.2.0
-
-	   Refer to the :ref:`octoprint.accesscontrol.appkey hook <sec-plugins-hook-accesscontrol-appkey>` instead.
-
-	"""
-
-	# noinspection PyMethodMayBeStatic
-	def get_additional_apps(self):
-		return []
-

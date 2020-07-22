@@ -5,7 +5,7 @@ logging.yaml
 
 The logging configuration file ``logging.yaml`` for OctoPrint is expected in its settings folder, which unless defined
 differently on the command line is located at ``~/.octoprint`` on Linux, at ``%APPDATA%/OctoPrint`` on Windows and at
-``~/Library/Application Support/OctoPrint`` on MacOS.
+``~/Library/Application Support/OctoPrint`` on macOS.
 
 You can use it to change the log levels of the individual components within OctoPrint, which might be necessary to help
 in debugging issues you are experiencing, or to change the configuration of the logging handlers themselves, e.g. in
@@ -39,8 +39,8 @@ A list of important components for which an increase in logging might be interes
   * ``octoprint.filemanager``: the file management layer
   * ``octoprint.plugin``: the plugin sub system
   * ``octoprint.plugins.<plugin>``: the plugin ``<plugin>``, e.g. ``octoprint.plugins.discovery`` to change the log level of
-    the `Discovery plugin <https://github.com/foosel/OctoPrint/wiki/Plugin:-Discovery>`_ or ``octoprint.plugins.cura``
-    to change the log level of the `Cura plugin <https://github.com/foosel/OctoPrint/wiki/Plugin:-Cura>`_.
+    the :ref:`Discovery plugin <sec-bundledplugins-discovery>` or ``octoprint.plugins.backup``
+    to change the log level of the :ref:`Backup plugin <sec-bundledplugins-backup>`.
   * ``octoprint.slicing``: the slicing sub system
 
 This list will be expanded when deemed necessary.

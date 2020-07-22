@@ -1,28 +1,35 @@
 <form class="form-horizontal">
-    <div class="control-group" title="{{ _('Name of this OctoPrint instance, will be shown in the navigation bar and broadcast on the network') }}">
+    <div class="control-group" title="{{ _('Name of this OctoPrint instance, will be shown in the navigation bar and broadcast on the network')|edq }}">
         <label class="control-label" for="settings-appearanceName">{{ _('Title') }}</label>
         <div class="controls">
             <input type="text" class="input-block-level" data-bind="value: appearance_name" id="settings-appearanceName">
         </div>
     </div>
-    <div class="control-group" title="{{ _('Personalize the color of the navigation bar - maybe to match your printer?') }}">
+    <div class="control-group" title="{{ _('Personalize the color of the navigation bar - maybe to match your printer?')|edq }}">
         <label class="control-label" for="settings-appearanceColor">{{ _('Color') }}</label>
         <div class="controls">
             <select id="settings-appearanceColor" data-bind="value: appearance_color, options: appearance_available_colors, optionsText: 'name', optionsValue: 'key'">
             </select>
         </div>
     </div>
-    <div class="control-group" title="{{ _('For acrylic printers ;)') }}">
+    <div class="control-group" title="{{ _('For acrylic printers ;)')|edq }}">
         <div class="controls">
             <label class="checkbox">
-                <input type="checkbox" data-bind="checked: appearance_colorTransparent"> {{ _('Transparent Color') }}
+                <input type="checkbox" data-bind="checked: appearance_colorTransparent"> {{ _('Transparent color') }}
+            </label>
+        </div>
+    </div>
+    <div class="control-group" title="{{ _('Also personalize the icon of the browser tab')|edq }}">
+        <div class="controls">
+            <label class="checkbox">
+                <input type="checkbox" data-bind="checked: appearance_colorIcon"> {{ _('Colorize favicon (in supported browsers)') }}
             </label>
         </div>
     </div>
     <div class="control-group" title="">
         <label class="control-label" for="settings-appearanceLanguages">{{ _('Language Packs') }}</label>
         <div class="controls">
-            <button class="btn" data-bind="click: showTranslationManager">{{ _('Manage...') }}</button>
+            <button class="btn" data-bind="click: showTranslationManager" id="settings-appearanceLanguages">{{ _('Manage...') }}</button>
         </div>
     </div>
     <div class="control-group" title="">
@@ -40,6 +47,20 @@
         <div class="controls">
             <label class="checkbox">
                 <input type="checkbox" data-bind="checked: appearance_showFahrenheitAlso" id="settings-appearanceShowFahrenheitAlso"> {{ _('Show temperatures in Fahrenheit as well as Celsius') }}
+            </label>
+        </div>
+    </div>
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+                <input type="checkbox" data-bind="checked: appearance_fuzzyTimes" id="settings-appearanceFuzzyTimes"> {{ _('Show fuzzy print time estimates') }}
+            </label>
+        </div>
+    </div>
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+                <input type="checkbox" data-bind="checked: appearance_closeModalsWithClick" id="settings-appearanceCloseModalsWithClick"> {{ _('Close dialogs by clicking outside') }}
             </label>
         </div>
     </div>
@@ -61,7 +82,7 @@
         <h4>{{ _('Available Language Packs') }}</h4>
 
         <div data-bind="visible: languagePacksAvailable()">
-            <div id="settings_appearance_managelanguagesdialog_list" data-bind="slimScrolledForeach: translations.paginatedItems" style="height: 300px">
+            <div id="settings_appearance_managelanguagesdialog_list" data-bind="foreach: translations.paginatedItems">
                 <div class="entry">
                     <strong><a href="#" class="fa" data-bind="toggleContent: { class: 'fa-caret-right fa-caret-down', parent: '.entry', container: '.packs' }"><i class="fa fa-caret-down"></i> <span data-bind="text: $root.languagePackDisplay($data)"></span></a></strong>
                     <div class="packs">

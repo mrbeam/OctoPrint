@@ -1,5 +1,5 @@
-# coding=utf-8
-from __future__ import absolute_import, division, print_function
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 __author__ = "Gina Häußge <osd@foosel.net>"
 __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agpl.html'
@@ -61,7 +61,7 @@ class TestCommHelpers(unittest.TestCase):
 			self.assertEqual(input, actual)
 		else:
 			import re
-			match = re.search("S(\d+(\.\d+)?)", actual)
+			match = re.search(r"S(\d+(\.\d+)?)", actual)
 			if not match:
 				self.fail("No temperature found")
 			temperature = float(match.group(1))
@@ -103,15 +103,16 @@ class TestCommHelpers(unittest.TestCase):
 			m.update(input)
 			return m.hexdigest()
 
-		temp_regex = "T:((\d*\.)\d+)"
-		temp_template = "Temp: {}"
-		temp2_template = "Temperature: {}"
+		# rb'' doesn't exist in Python2
+		temp_regex = r'T:((\d*\.)\d+)'.encode('utf-8')
+		temp_template = b"Temp: {}"
+		temp2_template = b"Temperature: {}"
 		temp_key = md5sum(temp_regex)
 		temp_template_key = md5sum(temp_template)
 		temp2_template_key = md5sum(temp2_template)
 
-		x_regex = "X:(?P<x>\d+)"
-		x_template = "X: {x}"
+		x_regex = r"X:(?P<x>\d+)".encode('utf-8')
+		x_template = b"X: {x}"
 		x_key = md5sum(x_regex)
 		x_template_key = md5sum(x_template)
 
@@ -259,7 +260,20 @@ class TestCommHelpers(unittest.TestCase):
 
 	@data(
 		("KEY1:Value 1 FIRMWARE_NAME:Some Firmware With Spaces KEY2:Value 2",
-		 dict(KEY1="Value 1", KEY2="Value 2", FIRMWARE_NAME="Some Firmware With Spaces"))
+		 dict(KEY1="Value 1", KEY2="Value 2", FIRMWARE_NAME="Some Firmware With Spaces")),
+		("NAME: Malyan VER: 2.9 MODEL: M200 HW: HA02",
+		 dict(NAME="Malyan", VER="2.9", MODEL="M200", HW="HA02")),
+		("NAME. Malyan	VER: 3.8	MODEL: M100	HW: HB02",
+		 dict(NAME="Malyan", VER="3.8", MODEL="M100", HW="HB02")),
+		("NAME. Malyan VER: 3.7 MODEL: M300 HW: HG01",
+		 dict(NAME="Malyan", VER="3.7", MODEL="M300", HW="HG01")),
+		("FIRMWARE_NAME:Marlin 1.1.0 From Archive SOURCE_CODE_URL:http:// ... PROTOCOL_VERSION:1.0 MACHINE_TYPE:www.cxsw3d.com EXTRUDER_COUNT:1 UUID:00000000-0000-0000-0000-000000000000",
+		 dict(FIRMWARE_NAME="Marlin 1.1.0 From Archive",
+		      SOURCE_CODE_URL="http:// ...",
+		      PROTOCOL_VERSION="1.0",
+		      MACHINE_TYPE="www.cxsw3d.com",
+		      EXTRUDER_COUNT="1",
+		      UUID="00000000-0000-0000-0000-000000000000"))
 	)
 	@unpack
 	def test_parse_firmware_line(self, line, expected):
@@ -297,3 +311,108 @@ class TestCommHelpers(unittest.TestCase):
 		from octoprint.util.comm import parse_resend_line
 		result = parse_resend_line(line)
 		self.assertEqual(expected, result)
+
+	@data(
+		# Marlin
+		("ok X:62.417 Y:64.781 Z:0.2 E:2.72328 Count: A:6241 B:6478 C:20", dict(x=62.417,
+		                                                                        y=64.781,
+		                                                                        z=0.2,
+		                                                                        e=2.72328)),
+		("X:62.417 Y:64.781 Z:0.2 E:2.72328 Count: A:6241 B:6478 C:20", dict(x=62.417,
+		                                                                     y=64.781,
+		                                                                     z=0.2,
+		                                                                     e=2.72328)),
+
+		# RepRapFirmware
+		("X:96.99 Y:88.31 Z:0.30 E0:0.0 E1:0.0 E2:0.0 E3:0.0 E4:0.0 E5:0.0", dict(x=96.99,
+		                                                                          y=88.31,
+		                                                                          z=0.3,
+		                                                                          e0=0.0,
+		                                                                          e1=0.0,
+		                                                                          e2=0.0,
+		                                                                          e3=0.0,
+		                                                                          e4=0.0,
+		                                                                          e5=0.0)),
+
+		# whitespace after the :, e.g. AlfaWise U20, see #2839
+		("X:150.0 Y:150.0 Z:  0.7 E:  0.0", dict(x=150.0,
+		                                         y=150.0,
+		                                         z=0.7,
+		                                         e=0.0)),
+
+		# invalid
+		("", None),
+		("X:62.417 Y:64.781 Z:0.2", None)
+	)
+	@unpack
+	def test_parse_position_line(self, line, expected):
+		from octoprint.util.comm import parse_position_line
+		result = parse_position_line(line)
+		if expected is None:
+			self.assertIsNone(result)
+		else:
+			self.assertDictEqual(expected, result)
+
+
+class TestPositionRecord(unittest.TestCase):
+
+	def test_as_dict_regular(self):
+		coords = dict(x=1, y=2, z=3, e=4)
+
+		position = self._create_position(**coords)
+
+		expected = dict(coords)
+		expected.update(dict(f=None, t=None))
+		self.assertDictEqual(position.as_dict(), expected)
+
+	def test_as_dict_extra_e(self):
+		coords = dict(x=1, y=2, z=3, e0=4, e1=5)
+
+		position = self._create_position(**coords)
+
+		expected = dict(coords)
+		expected.update(dict(e=None, f=None, t=None))
+		self.assertDictEqual(position.as_dict(), expected)
+
+	def test_copy_from_regular(self):
+		coords = dict(x=1, y=2, z=3, e=4)
+		position1 = self._create_position(**coords)
+		position2 = self._create_position()
+
+		position2.copy_from(position1)
+
+		expected = dict(coords)
+		expected.update(dict(f=None, t=None))
+		self.assertDictEqual(position2.as_dict(), expected)
+
+	def test_copy_from_extra_e(self):
+		coords = dict(x=1, y=2, z=3, e0=4, e1=5)
+		position1 = self._create_position(**coords)
+		position2 = self._create_position()
+
+		position2.copy_from(position1)
+
+		expected = dict(coords)
+		expected.update(dict(e=None, f=None, t=None))
+		self.assertDictEqual(position2.as_dict(), expected)
+
+	def test_copy_from_extra_e_changed(self):
+		coords1 = dict(x=1, y=2, z=3, e0=4, e1=5)
+		position1 = self._create_position(**coords1)
+
+		coords2 = dict(x=2, y=4, z=6, e0=8, e1=10, e2=12)
+		position2 = self._create_position(**coords2)
+
+		expected_before = dict(coords2)
+		expected_before.update(dict(e=None, f=None, t=None))
+		self.assertDictEqual(position2.as_dict(), expected_before)
+
+		position2.copy_from(position1)
+
+		expected_after = dict(coords1)
+		expected_after.update(dict(e=None, f=None, t=None))
+		self.assertDictEqual(position2.as_dict(), expected_after)
+
+	def _create_position(self, **kwargs):
+		from octoprint.util.comm import PositionRecord
+		return PositionRecord(**kwargs)

@@ -4,8 +4,10 @@ $(function() {
 
         self.loginState = parameters[0];
         self.settings = parameters[1];
+        self.access = parameters[2];
 
         self.tabActive = false;
+        self.previousScroll = undefined;
 
         self.log = ko.observableArray([]);
         self.log.extend({ throttle: 500 });
@@ -125,7 +127,7 @@ $(function() {
         });
 
         self.blacklist=[];
-        self.settings.serial_autoUppercaseBlacklist.subscribe(function(newValue) {
+        self.settings.feature_autoUppercaseBlacklist.subscribe(function(newValue) {
             self.blacklist = splitTextToArray(newValue, ",", true);
         });
 
@@ -277,6 +279,22 @@ $(function() {
             }
         };
 
+        self.terminalScrollEvent = _.throttle(function () {
+            var container = self.fancyFunctionality() ? $("#terminal-output") : $("#terminal-output-lowfi");
+            var pos = container.scrollTop();
+            var scrollingUp = self.previousScroll !== undefined && pos < self.previousScroll;
+
+            if (self.autoscrollEnabled() && scrollingUp) {
+                var maxScroll = container[0].scrollHeight - container[0].offsetHeight;
+
+                if (pos <= maxScroll ) {
+                    self.autoscrollEnabled(false);
+                }
+            }
+
+            self.previousScroll = pos;
+        }, 250);
+
         self.gotoTerminalCommand = function() {
             // skip if user highlights text.
             var sel = getSelection().toString();
@@ -289,6 +307,10 @@ $(function() {
 
         self.toggleAutoscroll = function() {
             self.autoscrollEnabled(!self.autoscrollEnabled());
+
+            if (self.autoscrollEnabled()) {
+                self.updateOutput();
+            }
         };
 
         self.selectAll = function() {
@@ -306,9 +328,21 @@ $(function() {
         };
 
         self.copyAll = function() {
-            copyToClipboard(self.plainLogLines().join("\n"));
+            var lines;
+
+            if (self.fancyFunctionality()) {
+                lines = _.map(self.log(), "line");
+            } else {
+                lines = self.plainLogLines();
+            }
+
+            copyToClipboard(lines.join("\n"));
         };
 
+        self.clearAllLogs = function() {
+            self.log([]);
+            self.plainLogLines([]);            
+        };
         // command matching regex
         // (Example output for inputs G0, G1, G28.1, M117 test)
         // - 1: code including optional subcode. Example: G0, G1, G28.1, M117
@@ -391,11 +425,15 @@ $(function() {
             self.updateOutput();
         };
 
+        self.onBrowserTabVisibilityChange = function(status) {
+            self.updateOutput();
+        };
+
     }
 
     OCTOPRINT_VIEWMODELS.push({
         construct: TerminalViewModel,
-        dependencies: ["loginStateViewModel", "settingsViewModel"],
-        elements: ["#term"]
+        dependencies: ["loginStateViewModel", "settingsViewModel", "accessViewModel"],
+        elements: ["#term", "#term_link"]
     });
 });

@@ -44,6 +44,14 @@ Printer State
      - 1
      - Boolean
      - ``true`` if the printer is currently printing, ``false`` otherwise
+   * - ``flags.pausing``
+     - 1
+     - Boolean
+     - ``true`` if the printer is currently printing and in the process of pausing, ``false`` otherwise
+   * - ``flags.cancelling``
+     - 1
+     - Boolean
+     - ``true`` if the printer is currently printing and in the process of pausing, ``false`` otherwise
    * - ``flags.sdReady``
      - 1
      - Boolean
@@ -210,6 +218,17 @@ Progress information
      - 1
      - Integer
      - Estimate of time left to print, in seconds
+   * - ``printTimeLeftOrigin``
+     - 1
+     - String
+     - Origin of the current time left estimate. Can currently be either of:
+
+         * ``linear``: based on an linear approximation of the progress in file in bytes vs time
+         * ``analysis``: based on an analysis of the file
+         * ``estimate``: calculated estimate after stabilization of linear estimation
+         * ``average``: based on the average total from past prints of the same model against the same printer profile
+         * ``mixed-analysis``: mixture of ``estimate`` and ``analysis``
+         * ``mixed-average``: mixture of ``estimate`` and ``average``
 
 .. _sec-api-datamodel-files:
 
@@ -255,8 +274,11 @@ File information
      - Path to type of file in extension tree. E.g. ``["model", "stl"]`` for ``.stl`` files, or ``["machinecode", "gcode"]``
        for ``.gcode`` files. ``["folder"]`` for folders.
 
-Additional properties depend on ``type``. For a ``type`` value of ``folder``, see "Folders". For any other value
-see "Files".
+Additional properties depend on ``type``.
+For a ``type`` value of ``folder``, see :ref:`Folders <sec-api-datamodel-files-folders>`.
+For any other value see :ref:`Files <sec-api-datamodel-files-files>`.
+
+.. _sec-api-datamodel-files-folders:
 
 Folders
 '''''''
@@ -272,13 +294,14 @@ Folders
    * - ``children``
      - 0..*
      - Array of :ref:`File information items <sec-api-datamodel-files-file>`
-     - Contained children for entries of type ``folder``. Will only include children in subfolders in recursive
-       listings. Not present in non recursive listings, this might be revisited in the future.
+     - Contained children for entries of type ``folder``. On non recursive listings only present on first level
+       sub folders!
    * - ``size``
      - 0..1
      - Number
-     - The size of all files contained in the folder and its subfolders. Not present in non recursive listings, this might
-       be revisited in the future.
+     - The size of all files contained in the folder and its subfolders. Not present in non recursive listings!
+
+.. _sec-api-datamodel-files-files:
 
 Files
 '''''
@@ -377,14 +400,58 @@ GCODE analysis information
      - 0..1
      - Object
      - The estimated usage of filament
-   * - ``filament.length``
+   * - ``filament.tool{n}.length``
      - 0..1
      - Integer
      - The length of filament used, in mm
-   * - ``filament.volume``
+   * - ``filament.tool{n}.volume``
      - 0..1
      - Float
      - The volume of filament used, in cm³
+   * - ``dimensions``
+     - 0..1
+     - Object
+     - Information regarding the size of the printed model
+   * - ``dimensions.depth``
+     - 0..1
+     - Float
+     - The depth of the printed model, in mm
+   * - ``dimensions.height``
+     - 0..1
+     - Float
+     - The height of the printed model, in mm
+   * - ``dimensions.width``
+     - 0..1
+     - Float
+     - The width of the printed model, in mm
+   * - ``printingArea``
+     - 0..1
+     - Object
+     - Information regarding the size of the printing area
+   * - ``printingArea.maxX``
+     - 0..1
+     - Float
+     - The maximum X coordinate of the printed model, in mm
+   * - ``printingArea.maxY``
+     - 0..1
+     - Float
+     - The maximum Y coordinate of the printed model, in mm
+   * - ``printingArea.maxZ``
+     - 0..1
+     - Float
+     - The maximum Z coordinate of the printed model, in mm
+   * - ``printingArea.minX``
+     - 0..1
+     - Float
+     - The minimum X coordinate of the printed model, in mm
+   * - ``printingArea.minY``
+     - 0..1
+     - Float
+     - The minimum Y coordinate of the printed model, in mm
+   * - ``printingArea.minZ``
+     - 0..1
+     - Float
+     - The minimum Z coordinate of the printed model, in mm
 
 
 .. _sec-api-datamodel-files-ref:
@@ -414,3 +481,172 @@ References
      - The model from which this file was generated (e.g. an STL, currently not used). Never present for
        folders.
 
+.. _sec-api-datamodel-access:
+
+Access control
+==============
+
+.. _sec-api-datamodel-access-users:
+
+User record
+-----------
+
+.. list-table::
+   :widths: 15 5 10 30
+   :header-rows: 1
+
+   * - Name
+     - Multiplicity
+     - Type
+     - Description
+   * - ``name``
+     - 1
+     - string
+     - The user's name
+   * - ``active``
+     - 1
+     - bool
+     - Whether the user's account is active (true) or not (false)
+   * - ``user``
+     - 1
+     - bool
+     - Whether the user has user rights. Should always be true. Deprecated as of 1.4.0, use the ``users`` group instead.
+   * - ``admin``
+     - 1
+     - bool
+     - Whether the user has admin rights (true) or not (false). Deprecated as of 1.4.0, use the ``admins`` group instead.
+   * - ``apikey``
+     - 0..1
+     - string
+     - The user's personal API key
+   * - ``settings``
+     - 1
+     - object
+     - The user's personal settings, might be an empty object.
+   * - ``groups``
+     - 1..n
+     - List of string
+     - Groups assigned to the user
+   * - ``needs``
+     - 1
+     - :ref:`Needs object <sec-api-datamodel-access-needs>`
+     - Effective needs of the user
+   * - ``permissions``
+     - 0..n
+     - List of :ref:`Permissions <sec-api-datamodel-access-permissions>`
+     - The list of permissions assigned to the user (note: this does not include implicit permissions inherit from groups).
+
+.. _sec-api-datamodel-access-permissions:
+
+Permission record
+-----------------
+
+.. list-table::
+   :widths: 15 5 10 30
+   :header-rows: 1
+
+   * - Name
+     - Multiplicity
+     - Type
+     - Description
+   * - ``key``
+     - 1
+     - string
+     - The permission's identifier
+   * - ``name``
+     - 1
+     - string
+     - The permission's name
+   * - ``dangerous``
+     - 1
+     - boolean
+     - Whether the permission should be considered dangerous due to a high reponsibility (true) or not (false).
+   * - ``default_groups``
+     - 1
+     - List of string
+     - List of group identifiers for which this permission is enabled by default
+   * - ``description``
+     - 1
+     - string
+     - Human readable description of the permission
+   * - ``needs``
+     - 1
+     - :ref:`Needs object <sec-api-access-datamodel-general-needs>`
+     - Needs assigned to the permission
+
+.. _sec-api-datamodel-access-groups:
+
+Group record
+------------
+
+.. list-table::
+   :widths: 15 5 10 30
+   :header-rows: 1
+
+   * - Name
+     - Multiplicity
+     - Type
+     - Description
+   * - ``key``
+     - 1
+     - string
+     - The group's identifier
+   * - ``name``
+     - 1
+     - string
+     - The group's name
+   * - ``description``
+     - 1
+     - string
+     - A human readable description of the group
+   * - ``permissions``
+     - 0..n
+     - List of :ref:`Permissions <sec-api-datamodel-access-permissions>`
+     - The list of permissions assigned to the group (note: this does not include implicit permissions inherited from
+       subgroups).
+   * - ``subgroups``
+     - 0..n
+     - List of :ref:`Groups <sec-api-datamodel-access-groups>`
+     - Subgroups assigned to the group
+   * - ``needs``
+     - 1
+     - :ref:`Needs object <sec-api-datamodel-access-needs>`
+     - Effective needs of the group
+   * - ``default``
+     - 1
+     - boolean
+     - Whether this is a default group (true) or not (false)
+   * - ``removable``
+     - 1
+     - boolean
+     - Whether this group can be removed (true) or not (false)
+   * - ``changeable``
+     - 1
+     - boolean
+     - Whether this group can be modified (true) or not (false)
+   * - ``toggleable``
+     - 1
+     - boolean
+     - Whether this group can be assigned to users or other groups (true) or not (false)
+
+.. _sec-api-datamodel-access-needs:
+
+Needs
+-----
+
+.. list-table::
+   :widths: 15 5 10 30
+   :header-rows: 1
+
+   * - Name
+     - Multiplicity
+     - Type
+     - Description
+   * - ``role``
+     - 0..1
+     - List of string
+     - List of ``role`` needs
+   * - ``group``
+     - 0..1
+     - List of string
+     - List of ``group`` needs

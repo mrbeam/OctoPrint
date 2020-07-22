@@ -45,7 +45,7 @@ function DataUpdater(allViewModels, connectCallback, disconnectCallback) {
 
     self.connect = function() {
         if (self._connectedDeferred) {
-            self._connectedDeferred.reject();
+            self._connectedDeferred.reject("reconnect");
         }
         self._connectedDeferred = $.Deferred();
         OctoPrint.socket.connect({debug: !!SOCKJS_DEBUG});
@@ -54,7 +54,7 @@ function DataUpdater(allViewModels, connectCallback, disconnectCallback) {
 
     self.reconnect = function() {
         if (self._connectedDeferred) {
-            self._connectedDeferred.reject();
+            self._connectedDeferred.reject("reconnect");
         }
         self._connectedDeferred = $.Deferred();
         OctoPrint.socket.reconnect();
@@ -121,6 +121,12 @@ function DataUpdater(allViewModels, connectCallback, disconnectCallback) {
         }
     };
 
+    self._onConnectTimeout = function() {
+        if (self._connectedDeferred) {
+            self._connectedDeferred.reject("timeout");
+        }
+    };
+
     self._onConnectMessage = function(event) {
         if (self._initializedDeferred) {
             self._initializedDeferred.reject();
@@ -132,6 +138,9 @@ function DataUpdater(allViewModels, connectCallback, disconnectCallback) {
         }
 
         var data = event.data;
+
+        // update permissions
+        PERMISSIONS = data["permissions"];
 
         // update version information
         var oldVersion = VERSION;
@@ -153,11 +162,28 @@ function DataUpdater(allViewModels, connectCallback, disconnectCallback) {
             if (self._safeModePopup) self._safeModePopup.remove();
             if (data["safe_mode"]) {
                 // safe mode is active, let's inform the user
-                log.info("Safe mode is active. Third party plugins are disabled and cannot be enabled.");
+                log.info("Safe mode is active. Third party plugins and language packs are disabled and cannot be enabled.");
+                log.info("Reason for safe mode: " + data["safe_mode"]);
+
+                var reason = gettext("Unknown");
+                switch (data["safe_mode"]) {
+                    case "flag": {
+                        reason = gettext("Command line flag");
+                        break;
+                    }
+                    case "settings": {
+                        reason = gettext("Setting in config.yaml");
+                        break;
+                    }
+                    case "incomplete_startup": {
+                        reason = gettext("Problem during last startup");
+                        break;
+                    }
+                }
 
                 self._safeModePopup = new PNotify({
                     title: gettext("Safe mode is active"),
-                    text: gettext("The server is currently running in safe mode. Third party plugins are disabled and cannot be enabled."),
+                    text: _.sprintf(gettext("<p>The server is currently running in safe mode. Third party plugins and language packs are disabled and cannot be enabled.</p><p>Reason: %(reason)s</p>"), {reason: _.escape(reason)}),
                     hide: false
                 });
             }
@@ -218,6 +244,18 @@ function DataUpdater(allViewModels, connectCallback, disconnectCallback) {
         });
     };
 
+    self._onRenderProgress = function(event) {
+        self._ifInitialized(function() {
+            var data = event.data;
+            callViewModels(self.allViewModels, "onRenderProgress", [
+                data["progress"]
+            ]);
+        });
+    };
+
+    self._printerErrorCancelNotification = undefined;
+    self._printerErrorDisconnectNotification = undefined;
+    self._printerResetNotification = undefined;
     self._onEvent = function(event) {
         self._ifInitialized(function() {
             var type = event.data["type"];
@@ -225,28 +263,84 @@ function DataUpdater(allViewModels, connectCallback, disconnectCallback) {
 
             log.debug("Got event " + type + " with payload: " + JSON.stringify(payload));
 
-            if (type == "PrintCancelled") {
-                if (payload.firmwareError) {
-                    new PNotify({
-                        title: gettext("Unhandled communication error"),
-                        text: _.sprintf(gettext("There was an unhandled error while talking to the printer. Due to that the ongoing print job was cancelled. Error: %(firmwareError)s"), payload),
-                        type: "error",
-                        hide: false
-                    });
+            if (type === "PrintCancelling" && payload.firmwareError) {
+                if (self._printerErrorCancelNotification !== undefined) {
+                    self._printerErrorCancelNotification.remove();
                 }
-            } else if (type == "Error") {
-                if (payload.error && payload.error.indexOf("autodetect") == -1) { // ignore "failed to autodetect"
-                    new PNotify({
-                            title: gettext("Unhandled communication error"),
-                            text: _.sprintf(gettext("There was an unhandled error while talking to the printer. Due to that OctoPrint disconnected. Error: %(error)s"), payload),
+                self._printerErrorCancelNotification = new PNotify({
+                    title: gettext("Error reported by printer"),
+                    text: _.sprintf(gettext("Your printer's firmware reported an error. Due to that the ongoing print job will be cancelled. Reported error: %(firmwareError)s"), {firmwareError: _.escape(payload.firmwareError)}),
+                    type: "error",
+                    hide: false
+                });
+            } else if (type === "Error" && payload.error) {
+                var title = undefined,
+                    text = undefined;
+
+                switch (payload.reason) {
+                    case "firmware": {
+                        title = gettext("Error reported by printer");
+                        text = _.sprintf(gettext("Your printer's firmware reported an error. Due to that OctoPrint will disconnect. Reported error: %(error)s"), {error: _.escape(payload.error)});
+                        break;
+                    }
+                    case "resend":
+                    case "resend_loop":
+                    case "timeout": {
+                        title = gettext("Communication error");
+                        text = _.sprintf(gettext("There was a communication error while talking to your printer. Please consult the terminal output and octoprint.log for details. Error: %(error)s"), {error: _.escape(payload.error)});
+                        break;
+                    }
+                    case "connection": {
+                        title = gettext("Error connecting to printer");
+                        text = _.sprintf(gettext("There was an error while trying to connect to your printer. Error: %(error)s"), {error: _.escape(payload.error)});
+                        break;
+                    }
+                    case "start_print": {
+                        title = gettext("Error starting a print");
+                        text = _.sprintf(gettext("There was an error while trying to start a print job. Error: %(error)s"), {error: _.escape(payload.error)});
+                        break;
+                    }
+                    case "autodetect_port":
+                    case "autodetect_baudrate": {
+                        // ignore
+                        break;
+                    }
+                    default: {
+                        title = gettext("Unknown error");
+                        text = _.sprintf(gettext("There was an unknown error while talking to your printer. Please consult the terminal output and octoprint.log for details. Error: %(error)s"), {error: _.escape(payload.error)});
+                        break;
+                    }
+                }
+
+                if (title && text) {
+                    if (self._printerErrorDisconnectNotification !== undefined) {
+                        self._printerErrorDisconnectNotification.remove();
+                    }
+                    self._printerErrorDisconnectNotification = new PNotify({
+                            title: title,
+                            text: text,
                             type: "error",
                             hide: false
                     });
                 }
-            } else if (type == "PrinterReset") {
-                new PNotify({
+            } else if (type === "PrinterReset") {
+                var severity = undefined,
+                    text = undefined;
+                if (payload.idle) {
+                    text = gettext("It looks like your printer reset while a connection was active. If this was intentional you may safely ignore this message. Otherwise you should investigate why your printer reset itself, since this will interrupt prints and also file transfers to your printer's SD.");
+                    severity = "alert";
+                } else {
+                    text = gettext("It looks like your printer reset while a connection was active. Due to this the ongoing job was aborted. If this was intentional you may safely ignore this message. Otherwise you should investigate why your printer reset itself, since this will interrupt prints and also file transfers to your printer's SD.");
+                    severity = "error";
+                }
+
+                if (self._printerResetNotification !== undefined) {
+                    self._printerResetNotification.remove();
+                }
+                self._printerResetNotification = new PNotify({
                     title: gettext("Printer reset detected"),
-                    text: gettext("It looks like the printer was reset while a connection was active. If this was intentional you may safely ignore this message. Otherwise you should investigate why your printer reset itself, since this will interrupt prints and also file transfers to your printer's SD."),
+                    text: text,
+                    type: severity,
                     hide: false
                 });
             }
@@ -284,6 +378,12 @@ function DataUpdater(allViewModels, connectCallback, disconnectCallback) {
         })
     };
 
+    self._onReauthMessage = function(event) {
+        self._ifInitialized(function() {
+            callViewModels(self.allViewModels, "onDataUpdaterReauthRequired", [event.data.reason]);
+        })
+    };
+
     self._onIncreaseRate = function(measurement, minimum) {
         log.debug("We are fast (" + measurement + " < " + minimum + "), increasing refresh rate");
         OctoPrint.socket.increaseRate();
@@ -305,6 +405,7 @@ function DataUpdater(allViewModels, connectCallback, disconnectCallback) {
     OctoPrint.socket.onDisconnected = self._onDisconnected;
     OctoPrint.socket.onReconnectAttempt = self._onReconnectAttempt;
     OctoPrint.socket.onReconnectFailed = self._onReconnectFailed;
+    OctoPrint.socket.onConnectTimeout = self._onConnectTimeout;
     OctoPrint.socket.onRateTooHigh = self._onDecreaseRate;
     OctoPrint.socket.onRateTooLow = self._onIncreaseRate;
     OctoPrint.socket
@@ -312,7 +413,9 @@ function DataUpdater(allViewModels, connectCallback, disconnectCallback) {
         .onMessage("history", self._onHistoryData)
         .onMessage("current", self._onCurrentData)
         .onMessage("slicingProgress", self._onSlicingProgress)
+        .onMessage("renderProgress", self._onRenderProgress)
         .onMessage("event", self._onEvent)
         .onMessage("timelapse", self._onTimelapse)
-        .onMessage("plugin", self._onPluginMessage);
+        .onMessage("plugin", self._onPluginMessage)
+        .onMessage("reauthRequired", self._onReauthMessage);
 }

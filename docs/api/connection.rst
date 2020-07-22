@@ -16,6 +16,8 @@ Get connection settings
    Retrieve the current connection settings, including information regarding the available baudrates and
    serial ports and the current connection state.
 
+   Requires the ``STATUS`` permission.
+
    **Example**
 
    .. sourcecode:: http
@@ -59,7 +61,7 @@ Issue a connection command
    Issue a connection command. Currently available command are:
 
    connect
-     Instructs OctoPrint to connect to the printer. Additional parameters are:
+     Instructs OctoPrint to connect or, if already connected, reconnect to the printer. Additional parameters are:
 
      * ``port``: Optional, specific port to connect to. If not set the current ``portPreference`` will be used, or if
        no preference is available auto detection will be attempted.
@@ -81,7 +83,7 @@ Issue a connection command
      for the lost acknowledgment should always be properly investigated and removed instead of depending on this
      "symptom solver".
 
-   Requires user rights.
+   Requires the ``CONNECTION`` permission.
 
    **Example Connect Request**
 

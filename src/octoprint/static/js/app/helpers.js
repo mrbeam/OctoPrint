@@ -1,4 +1,4 @@
-function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSorting, defaultFilters, exclusiveFilters, filesPerPage) {
+function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSorting, defaultFilters, exclusiveFilters, defaultPageSize, persistPageSize) {
     var self = this;
 
     self.listType = listType;
@@ -7,6 +7,8 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
     self.defaultSorting = defaultSorting;
     self.defaultFilters = defaultFilters;
     self.exclusiveFilters = exclusiveFilters;
+    self.defaultPageSize = defaultPageSize;
+    self.persistPageSize = !!persistPageSize;
 
     self.searchFunction = undefined;
 
@@ -14,11 +16,18 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
     self.allSize = ko.observable(0);
 
     self.items = ko.observableArray([]);
-    self.pageSize = ko.observable(filesPerPage);
+    self.pageSize = ko.observable(self.defaultPageSize);
     self.currentPage = ko.observable(0);
     self.currentSorting = ko.observable(self.defaultSorting);
     self.currentFilters = ko.observableArray(self.defaultFilters);
     self.selectedItem = ko.observable(undefined);
+    self.filterSearch = ko.observable(true);
+
+    self.storageIds = {
+        "currentSorting": self.listType + "." + "currentSorting",
+        "currentFilters": self.listType + "." + "currentFilters",
+        "pageSize": self.listType + "." + "pageSize"
+    };
 
     //~~ item handling
 
@@ -27,6 +36,7 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
     };
 
     self.updateItems = function(items) {
+        if (items === undefined) items = [];
         self.allItems = items;
         self.allSize(items.length);
         self._updateItems();
@@ -47,7 +57,7 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
     };
 
     self.isSelected = function(data) {
-        return self.selectedItem() == data;
+        return self.selectedItem() === data;
     };
 
     self.isSelectedByMatcher = function(matcher) {
@@ -55,24 +65,32 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
     };
 
     self.removeItem = function(matcher) {
-        var item = self.getItem(matcher, true);
-        if (item === undefined) {
-            return;
-        }
-
-        var index = self.allItems.indexOf(item);
+        var index = self.getIndex(matcher, true);
         if (index > -1) {
             self.allItems.splice(index, 1);
             self._updateItems();
         }
     };
 
+    self.updateItem = function(matcher, item) {
+        var index = self.allItems.findIndex(matcher);
+        if (index > -1) {
+            self.allItems[index] = item;
+            self._updateItems();
+        }
+    };
+
+    self.addItem = function(item) {
+        self.allItems.push(item);
+        self._updateItems();
+    };
+
     //~~ pagination
 
     self.paginatedItems = ko.dependentObservable(function() {
-        if (self.items() == undefined) {
+        if (self.items() === undefined) {
             return [];
-        } else if (self.pageSize() == 0) {
+        } else if (self.pageSize() === 0) {
             return self.items();
         } else {
             var from = Math.max(self.currentPage() * self.pageSize(), 0);
@@ -81,31 +99,33 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
         }
     });
     self.lastPage = ko.dependentObservable(function() {
-        return (self.pageSize() == 0 ? 1 : Math.ceil(self.items().length / self.pageSize()) - 1);
+        return (self.pageSize() === 0 ? 1 : Math.ceil(self.items().length / self.pageSize()) - 1);
     });
     self.pages = ko.dependentObservable(function() {
         var pages = [];
-        if (self.pageSize() == 0) {
+        var i;
+
+        if (self.pageSize() === 0) {
             pages.push({ number: 0, text: 1 });
         } else if (self.lastPage() < 7) {
-            for (var i = 0; i < self.lastPage() + 1; i++) {
+            for (i = 0; i < self.lastPage() + 1; i++) {
                 pages.push({ number: i, text: i+1 });
             }
         } else {
             pages.push({ number: 0, text: 1 });
             if (self.currentPage() < 5) {
-                for (var i = 1; i < 5; i++) {
+                for (i = 1; i < 5; i++) {
                     pages.push({ number: i, text: i+1 });
                 }
                 pages.push({ number: -1, text: "…"});
             } else if (self.currentPage() > self.lastPage() - 5) {
                 pages.push({ number: -1, text: "…"});
-                for (var i = self.lastPage() - 4; i < self.lastPage(); i++) {
+                for (i = self.lastPage() - 4; i < self.lastPage(); i++) {
                     pages.push({ number: i, text: i+1 });
                 }
             } else {
                 pages.push({ number: -1, text: "…"});
-                for (var i = self.currentPage() - 1; i <= self.currentPage() + 1; i++) {
+                for (i = self.currentPage() - 1; i <= self.currentPage() + 1; i++) {
                     pages.push({ number: i, text: i+1 });
                 }
                 pages.push({ number: -1, text: "…"});
@@ -146,20 +166,29 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
         }
     };
 
-    self.getItem = function(matcher, all) {
+    self.getIndex = function(matcher, all) {
         var itemList;
         if (all !== undefined && all === true) {
             itemList = self.allItems;
         } else {
             itemList = self.items();
         }
+
         for (var i = 0; i < itemList.length; i++) {
             if (matcher(itemList[i])) {
-                return itemList[i];
+                return i;
             }
         }
+        return -1;
+    };
 
-        return undefined;
+    self.getItem = function(matcher, all) {
+        var index = self.getIndex(matcher, all);
+        if (all !== undefined && all === true) {
+            return index > -1 ? self.allItems[index] : undefined;
+        } else {
+            return index > -1 ? self.items()[index] : undefined;
+        }
     };
 
     self.resetPage = function() {
@@ -195,6 +224,19 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
 
     //~~ filtering
 
+    self.setFilterSearch = function(enabled) {
+        if (self.filterSearch() === enabled)
+            return;
+
+        self.filterSearch(enabled);
+        self.changePage(0);
+        self._updateItems();
+    };
+
+    self.toggleFilterSearch = function() {
+        self.setFilterSearch(!self.filterSearch());
+    };
+
     self.toggleFilter = function(filter) {
         if (!_.contains(_.keys(self.supportedFilters), filter))
             return;
@@ -213,7 +255,7 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
         for (var i = 0; i < self.exclusiveFilters.length; i++) {
             if (_.contains(self.exclusiveFilters[i], filter)) {
                 for (var j = 0; j < self.exclusiveFilters[i].length; j++) {
-                    if (self.exclusiveFilters[i][j] == filter)
+                    if (self.exclusiveFilters[i][j] === filter)
                         continue;
                     self.removeFilter(self.exclusiveFilters[i][j]);
                 }
@@ -255,15 +297,19 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
         // work on all items
         var result = self.allItems;
 
-        // filter if necessary
-        var filters = self.currentFilters();
-        _.each(filters, function(filter) {
-            if (typeof filter !== 'undefined' && typeof supportedFilters[filter] !== 'undefined')
-                result = _.filter(result, supportedFilters[filter]);
-        });
+        var hasSearch = typeof self.searchFunction !== 'undefined' && self.searchFunction;
+
+        // filter if we're not searching or have search filtering enabled
+        if (!hasSearch || self.filterSearch()) {
+            var filters = self.currentFilters();
+            _.each(filters, function (filter) {
+                if (typeof filter !== 'undefined' && typeof supportedFilters[filter] !== 'undefined')
+                    result = _.filter(result, supportedFilters[filter]);
+            });
+        }
 
         // search if necessary
-        if (typeof self.searchFunction !== 'undefined' && self.searchFunction) {
+        if (hasSearch) {
             result = _.filter(result, self.searchFunction);
         }
 
@@ -281,16 +327,16 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
         if ( self._initializeLocalStorage() ) {
             var currentSorting = self.currentSorting();
             if (currentSorting !== undefined)
-                localStorage[self.listType + "." + "currentSorting"] = currentSorting;
+                localStorage[self.storageIds.currentSorting] = currentSorting;
             else
-                localStorage[self.listType + "." + "currentSorting"] = undefined;
+                localStorage[self.storageIds.currentSorting] = undefined;
         }
     };
 
     self._loadCurrentSortingFromLocalStorage = function() {
         if ( self._initializeLocalStorage() ) {
-            if (_.contains(_.keys(supportedSorting), localStorage[self.listType + "." + "currentSorting"]))
-                self.currentSorting(localStorage[self.listType + "." + "currentSorting"]);
+            if (_.contains(_.keys(supportedSorting), localStorage[self.storageIds.currentSorting]))
+                self.currentSorting(localStorage[self.storageIds.currentSorting]);
             else
                 self.currentSorting(defaultSorting);
         }
@@ -299,13 +345,27 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
     self._saveCurrentFiltersToLocalStorage = function() {
         if ( self._initializeLocalStorage() ) {
             var filters = _.intersection(_.keys(self.supportedFilters), self.currentFilters());
-            localStorage[self.listType + "." + "currentFilters"] = JSON.stringify(filters);
+            localStorage[self.storageIds.currentFilters] = JSON.stringify(filters);
         }
     };
 
     self._loadCurrentFiltersFromLocalStorage = function() {
         if ( self._initializeLocalStorage() ) {
-            self.currentFilters(_.intersection(_.keys(self.supportedFilters), JSON.parse(localStorage[self.listType + "." + "currentFilters"])));
+            self.currentFilters(_.intersection(_.keys(self.supportedFilters), JSON.parse(localStorage[self.storageIds.currentFilters])));
+        }
+    };
+
+    self._savePageSizeToLocalStorage = function(pageSize) {
+        if (self._initializeLocalStorage() && self.persistPageSize) {
+            localStorage[self.storageIds.pageSize] = pageSize;
+        }
+    };
+
+    self.pageSize.subscribe(self._savePageSizeToLocalStorage);
+
+    self._loadPageSizeFromLocalStorage = function() {
+        if (self._initializeLocalStorage() && self.persistPageSize) {
+            self.pageSize(parseInt(localStorage[self.storageIds.pageSize]));
         }
     };
 
@@ -313,17 +373,19 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
         if (!Modernizr.localstorage)
             return false;
 
-        if (localStorage[self.listType + "." + "currentSorting"] !== undefined && localStorage[self.listType + "." + "currentFilters"] !== undefined && JSON.parse(localStorage[self.listType + "." + "currentFilters"]) instanceof Array)
+        if (localStorage[self.storageIds.currentSorting] !== undefined && localStorage[self.storageIds.currentFilters] !== undefined && JSON.parse(localStorage[self.storageIds.currentFilters]) instanceof Array && localStorage[self.storageIds.pageSize] !== undefined)
             return true;
 
-        localStorage[self.listType + "." + "currentSorting"] = self.defaultSorting;
-        localStorage[self.listType + "." + "currentFilters"] = JSON.stringify(self.defaultFilters);
+        localStorage[self.storageIds.currentSorting] = self.defaultSorting;
+        localStorage[self.storageIds.currentFilters] = JSON.stringify(self.defaultFilters);
+        localStorage[self.storageIds.pageSize] = self.defaultPageSize;
 
         return true;
     };
 
     self._loadCurrentFiltersFromLocalStorage();
     self._loadCurrentSortingFromLocalStorage();
+    self._loadPageSizeFromLocalStorage();
 }
 
 function formatSize(bytes) {
@@ -340,13 +402,13 @@ function formatSize(bytes) {
 }
 
 function bytesFromSize(size) {
-    if (size == undefined || size.trim() == "") return undefined;
+    if (size === undefined || size.trim() === "") return undefined;
 
     var parsed = size.match(/^([+]?[0-9]*\.?[0-9]+)(?:\s*)?(.*)$/);
     var number = parsed[1];
     var unit = parsed[2].trim();
 
-    if (unit == "") return parseFloat(number);
+    if (unit === "") return parseFloat(number);
 
     var units = {
         b: 1,
@@ -382,7 +444,7 @@ function formatFuzzyEstimation(seconds, base) {
     if (!seconds || seconds < 1) return "-";
 
     var m;
-    if (base != undefined) {
+    if (base !== undefined) {
         m = moment(base);
     } else {
         m = moment();
@@ -514,9 +576,19 @@ function formatFuzzyPrintTime(totalSeconds) {
     return _.sprintf(text, replacements);
 }
 
-function formatDate(unixTimestamp) {
+function formatDate(unixTimestamp, options) {
+    if (!options) {
+        options = { seconds: false };
+    }
+
     if (!unixTimestamp) return "-";
-    return moment.unix(unixTimestamp).format(gettext(/* L10N: Date format */ "YYYY-MM-DD HH:mm"));
+
+    var format = gettext(/* L10N: Date format */ "YYYY-MM-DD HH:mm");
+    if (options.seconds) {
+        format = gettext(/* L10N: Date format with seconds */ "YYYY-MM-DD HH:mm:ss");
+    }
+
+    return moment.unix(unixTimestamp).format(format);
 }
 
 function formatTimeAgo(unixTimestamp) {
@@ -533,15 +605,15 @@ function formatFilament(filament) {
     return _.sprintf(result, {length: filament["length"] / 1000, volume: filament["volume"]});
 }
 
-function cleanTemperature(temp) {
+function cleanTemperature(temp, offThreshold) {
     if (temp === undefined || !_.isNumber(temp)) return "-";
-    if (temp < 10) return gettext("off");
+    if (offThreshold !== undefined && temp < offThreshold) return gettext("off");
     return temp;
 }
 
-function formatTemperature(temp, showF) {
+function formatTemperature(temp, showF, offThreshold) {
     if (temp === undefined || !_.isNumber(temp)) return "-";
-    if (temp < 10) return gettext("off");
+    if (offThreshold !== undefined && temp < offThreshold) return gettext("off");
     if (showF) {
         return _.sprintf("%.1f&deg;C (%.1f&deg;F)", temp, temp * 9 / 5 + 32);
     } else {
@@ -580,15 +652,17 @@ function ping(url, callback) {
 }
 
 function showOfflineOverlay(title, message, reconnectCallback) {
-    if (title == undefined) {
+    if (title === undefined) {
         title = gettext("Server is offline");
     }
 
     $("#offline_overlay_title").text(title);
     $("#offline_overlay_message").html(message);
     $("#offline_overlay_reconnect").click(reconnectCallback);
-    if (!$("#offline_overlay").is(":visible"))
-        $("#offline_overlay").show();
+
+    var overlay = $("#offline_overlay");
+    if (!overlay.is(":visible"))
+        overlay.show();
 }
 
 function hideOfflineOverlay() {
@@ -609,6 +683,7 @@ function showMessageDialog(msg, options) {
     var onclose = options.onclose || undefined;
     var onshow = options.onshow || undefined;
     var onshown = options.onshown || undefined;
+    var nofade = options.nofade || false;
 
     if (_.isString(message)) {
         message = $("<p>" + message + "</p>");
@@ -619,7 +694,11 @@ function showMessageDialog(msg, options) {
     var modalFooter = $('<a href="javascript:void(0)" class="btn" data-dismiss="modal" aria-hidden="true">' + close + '</a>');
 
     var modal = $('<div></div>')
-        .addClass('modal hide fade')
+        .addClass("modal hide");
+    if (!nofade) {
+        modal.addClass("fade");
+    }
+    modal
         .append($('<div></div>').addClass('modal-header').append(modalHeader))
         .append($('<div></div>').addClass('modal-body').append(modalBody))
         .append($('<div></div>').addClass('modal-footer').append(modalFooter));
@@ -652,30 +731,172 @@ function showConfirmationDialog(msg, onacknowledge, options) {
     }
 
     var title = options.title || gettext("Are you sure?");
+
     var message = options.message || "";
     var question = options.question || gettext("Are you sure you want to proceed?");
+
+    var html = options.html;
+
+    var checkboxes = options.checkboxes;
+
     var cancel = options.cancel || gettext("Cancel");
     var proceed = options.proceed || gettext("Proceed");
     var proceedClass = options.proceedClass || "danger";
     var onproceed = options.onproceed || undefined;
+    var oncancel = options.oncancel || undefined;
     var onclose = options.onclose || undefined;
     var dialogClass = options.dialogClass || "";
+    var nofade = options.nofade || false;
+    var noclose = options.noclose || false;
 
-    var modalHeader = $('<a href="javascript:void(0)" class="close" data-dismiss="modal" aria-hidden="true">&times;</a><h3>' + title + '</h3>');
-    var modalBody = $('<p>' + message + '</p><p>' + question + '</p>');
+    var modalHeader;
+    if (noclose) {
+        modalHeader = $('<h3>' + title + '</h3>');
+    } else {
+        modalHeader = $('<a href="javascript:void(0)" class="close" data-dismiss="modal" aria-hidden="true">&times;</a><h3>' + title + '</h3>');
+    }
+
+    var modalBody;
+    if (html) {
+        modalBody = $(html);
+    } else {
+        modalBody = $('<p>' + message + '</p><p>' + question + '</p>');
+    }
 
     var cancelButton = $('<a href="javascript:void(0)" class="btn">' + cancel + '</a>')
         .attr("data-dismiss", "modal")
         .attr("aria-hidden", "true");
-    var proceedButton = $('<a href="javascript:void(0)" class="btn">' + proceed + '</a>')
-        .addClass("btn-" + proceedClass);
+
+    if (!_.isArray(proceed)) {
+        proceed = [proceed];
+    }
+
+    var proceedButtons = [];
+    _.each(proceed, function(text) {
+        proceedButtons.push($('<a href="javascript:void(0)" class="btn">' + text + '</a>')
+            .addClass("btn-" + proceedClass));
+    });
 
     var modal = $('<div></div>')
-        .addClass('modal hide fade')
-        .addClass(dialogClass)
+        .addClass('modal hide');
+    if (!nofade) {
+        modal.addClass('fade');
+    }
+
+    var buttons = $('<div></div>').addClass('modal-footer').append(cancelButton);
+    _.each(proceedButtons, function(button) {
+        buttons.append(button);
+    });
+
+    modal.addClass(dialogClass)
         .append($('<div></div>').addClass('modal-header').append(modalHeader))
         .append($('<div></div>').addClass('modal-body').append(modalBody))
-        .append($('<div></div>').addClass('modal-footer').append(cancelButton).append(proceedButton));
+        .append(buttons);
+    modal.on('hidden', function(event) {
+        if (onclose && _.isFunction(onclose)) {
+            onclose(event);
+        }
+    });
+
+    var modalOptions = {};
+    if (noclose) {
+        modalOptions.backdrop = "static";
+        modalOptions.keyboard = false;
+    }
+    modal.modal(modalOptions);
+
+    _.each(proceedButtons, function(button, idx) {
+        button.click(function(e) {
+            e.preventDefault();
+            if (onproceed && _.isFunction(onproceed)) {
+                onproceed(idx, e);
+            }
+            modal.modal("hide");
+        })
+    });
+    cancelButton.click(function(e) {
+        if (oncancel && _.isFunction(oncancel)) {
+            oncancel(e);
+        }
+    });
+
+    return modal;
+}
+
+function showSelectionDialog(options) {
+    var title = options.title;
+    var message = options.message || undefined;
+    var selections = options.selections || [];
+
+    var maycancel = options.maycancel || false;
+    var cancel = options.cancel || undefined;
+    var onselect = options.onselect || undefined;
+    var onclose = options.onclose || undefined;
+    var dialogClass = options.dialogClass || "";
+    var nofade = options.nofade || false;
+
+    // header
+    var modalHeader;
+    if (maycancel) {
+        modalHeader = $('<a href="javascript:void(0)" class="close" data-dismiss="modal" aria-hidden="true">&times;</a><h3>' + title + '</h3>');
+    } else {
+        modalHeader = $('<h3>' + title + '</h3>');
+    }
+
+    // body
+    var buttons = [];
+    var selectionBody = $("<div></div>");
+    var container;
+    var additionalClass;
+
+    if (selections.length === 1) {
+        container = selectionBody;
+        additionalClass = "btn-block";
+    } else if (selections.length === 2) {
+        container = $("<div class='row-fluid'></div>");
+        selectionBody.append(container);
+        additionalClass = "span6"
+    } else {
+        container = selectionBody;
+        additionalClass = "btn-block";
+    }
+
+    _.each(selections, function(s, i) {
+        var button = $('<button class="btn" style="white-space: normal; word-wrap: break-word" data-index="' + i + '">' + selections[i] + '</button>');
+        if (additionalClass) {
+            button.addClass(additionalClass);
+        }
+        container.append(button);
+        buttons.push(button);
+
+        if (selections.length > 2 && i < selections.length - 1) {
+            container = $("<div class='row-fluid'></div>");
+            selectionBody.append(container);
+        }
+    });
+
+    // divs
+    var headerDiv = $('<div></div>').addClass('modal-header').append(modalHeader);
+
+    var bodyDiv = $('<div></div>').addClass('modal-body');
+    if (message) {
+        bodyDiv.append($('<p>' + message + '</p>'));
+    }
+    bodyDiv.append(selectionBody);
+
+    // create modal and do final wiring up
+    var modal = $('<div></div>')
+        .addClass('modal hide');
+    if (!nofade) {
+        modal.addClass('fade');
+    }
+    if (!cancel) {
+        modal.data("backdrop", "static").data("keyboard", "false");
+    }
+
+    modal.addClass(dialogClass)
+        .append(headerDiv)
+        .append(bodyDiv);
     modal.on('hidden', function(event) {
         if (onclose && _.isFunction(onclose)) {
             onclose(event);
@@ -683,12 +904,19 @@ function showConfirmationDialog(msg, onacknowledge, options) {
     });
     modal.modal("show");
 
-    proceedButton.click(function(e) {
-        e.preventDefault();
-        if (onproceed && _.isFunction(onproceed)) {
-            onproceed(e);
-        }
-        modal.modal("hide");
+    _.each(buttons, function(button) {
+        button.click(function(e) {
+            e.preventDefault();
+            var index = button.data("index");
+            if (index < 0) {
+                return;
+            }
+
+            if (onselect && _.isFunction(onselect)) {
+                onselect(index, e);
+            }
+            modal.modal("hide");
+        })
     });
 
     return modal;
@@ -764,7 +992,7 @@ function showProgressModal(options, promise) {
     var progressTextFront = $('<span class="progress-text-front"></span>')
         .width(progress.width());
 
-    if (max == undefined) {
+    if (max === undefined) {
         progress.addClass("progress-striped active");
         progressBar.width("100%");
     }
@@ -911,15 +1139,12 @@ function splitTextToArray(text, sep, stripEmpty, filter) {
  * and is optimized to check for value changes, not key updates.
  */
 function hasDataChanged(data, oldData) {
-    if (data == undefined) {
+    // noinspection EqualityComparisonWithCoercionJS
+    if (data == oldData && data == undefined) {
         return false;
     }
 
-    if (oldData == undefined) {
-        return true;
-    }
-
-    if (_.isPlainObject(data)) {
+    if (_.isPlainObject(data) && _.isPlainObject(oldData)) {
         return _.any(_.keys(data), function(key) {return hasDataChanged(data[key], oldData[key]);});
     } else {
         return !_.isEqual(data, oldData);
@@ -956,10 +1181,12 @@ function hasDataChanged(data, oldData) {
  * and is optimized to check for value changes, not key updates.
  */
 function getOnlyChangedData(data, oldData) {
+    // noinspection EqualityComparisonWithCoercionJS
     if (data == undefined) {
         return {};
     }
 
+    // noinspection EqualityComparisonWithCoercionJS
     if (oldData == undefined) {
         return data;
     }
@@ -972,17 +1199,20 @@ function getOnlyChangedData(data, oldData) {
         var retval = {};
         _.forOwn(root, function(value, key) {
             var oldValue = undefined;
+            // noinspection EqualityComparisonWithCoercionJS
             if (oldRoot != undefined && oldRoot.hasOwnProperty(key)) {
                 oldValue = oldRoot[key];
             }
             if (_.isPlainObject(value)) {
+                // noinspection EqualityComparisonWithCoercionJS
                 if (oldValue == undefined) {
                     retval[key] = value;
                 } else if (hasDataChanged(value, oldValue)) {
                     retval[key] = f(value, oldValue);
                 }
             } else {
-                if (!_.isEqual(value, oldValue)) {
+                // noinspection EqualityComparisonWithCoercionJS
+                if (!(value == oldValue && value == undefined) && !_.isEqual(value, oldValue)) {
                     retval[key] = value;
                 }
             }
@@ -1051,7 +1281,7 @@ function callViewModelIf(viewModel, method, condition, callback, raiseErrors) {
         condition = function() { return true; };
     }
 
-    if (!viewModel.hasOwnProperty(method) || !condition(viewModel, method)) return;
+    if (!_.isFunction(viewModel[method]) || !condition(viewModel, method)) return;
 
     var parameters = undefined;
     if (!_.isFunction(callback)) {
@@ -1109,7 +1339,7 @@ var sizeObservable = function(observable) {
         },
         write: function(value) {
             var result = bytesFromSize(value);
-            if (result != undefined) {
+            if (result !== undefined) {
                 observable(result);
             }
         }
@@ -1135,7 +1365,7 @@ var getQueryParameterByName = function(name, url) {
  * E.g. turns a null byte in the string into "\x00".
  *
  * Characters 0 to 31 excluding 9, 10 and 13 will be escaped, as will
- * 127 and 255. That should leave printable characters and unicode
+ * 127, 128 to 159 and 255. That should leave printable characters and unicode
  * alone.
  *
  * Originally based on
@@ -1150,7 +1380,7 @@ var escapeUnprintableCharacters = function(str) {
     var charCode;
 
     while (!isNaN(charCode = str.charCodeAt(index))) {
-        if ((charCode < 32 && charCode != 9 && charCode != 10 && charCode != 13) || charCode == 127 || charCode == 255) {
+        if ((charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13) || charCode === 127 || (charCode >= 128 && charCode <= 159) || charCode === 255) {
             // special hex chars
             result += "\\x" + (charCode > 15 ? "" : "0") + charCode.toString(16)
         } else {

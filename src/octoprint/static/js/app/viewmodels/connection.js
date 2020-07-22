@@ -5,6 +5,7 @@ $(function() {
         self.loginState = parameters[0];
         self.settings = parameters[1];
         self.printerProfiles = parameters[2];
+        self.access = parameters[3];
 
         self.printerProfiles.profiles.items.subscribe(function() {
             var allProfiles = self.printerProfiles.profiles.items();
@@ -46,7 +47,13 @@ $(function() {
 
         self.previousIsOperational = undefined;
 
+        self.refreshVisible = ko.observable(true);
+
         self.requestData = function() {
+            if (!self.loginState.hasPermission(self.access.permissions.CONNECTION)) {
+                return;
+            }
+
             OctoPrint.connection.getSettings()
                 .done(self.fromResponse);
         };
@@ -54,6 +61,9 @@ $(function() {
         self.fromResponse = function(response) {
             var ports = response.options.ports;
             var baudrates = response.options.baudrates;
+            var currentPort = response.current.port;
+            var currentBaudrate = response.current.baudrate;
+            var currentPrinterProfile = response.current.printerProfile;
             var portPreference = response.options.portPreference;
             var baudratePreference = response.options.baudratePreference;
             var printerPreference = response.options.printerProfilePreference;
@@ -62,12 +72,27 @@ $(function() {
             self.portOptions(ports);
             self.baudrateOptions(baudrates);
 
-            if (!self.selectedPort() && ports && ports.indexOf(portPreference) >= 0)
-                self.selectedPort(portPreference);
-            if (!self.selectedBaudrate() && baudrates && baudrates.indexOf(baudratePreference) >= 0)
-                self.selectedBaudrate(baudratePreference);
-            if (!self.selectedPrinter() && printerProfiles && printerProfiles.indexOf(printerPreference) >= 0)
-                self.selectedPrinter(printerPreference);
+            if (!self.selectedPort() && ports) {
+                if (ports.indexOf(currentPort) >= 0) {
+                    self.selectedPort(currentPort);
+                } else if (ports.indexOf(portPreference) >= 0) {
+                    self.selectedPort(portPreference);
+                }
+            }
+            if (!self.selectedBaudrate() && baudrates) {
+                if (baudrates.indexOf(currentBaudrate) >= 0) {
+                    self.selectedBaudrate(currentBaudrate);
+                } else if (baudrates.indexOf(baudratePreference) >= 0) {
+                    self.selectedBaudrate(baudratePreference);
+                }
+            }
+            if (!self.selectedPrinter() && printerProfiles) {
+                if (printerProfiles.indexOf(currentPrinterProfile) >= 0) {
+                    self.selectedPrinter(currentPrinterProfile);
+                } else if (printerProfiles.indexOf(printerPreference) >= 0) {
+                    self.selectedPrinter(printerPreference);
+                }
+            }
 
             self.saveSettings(false);
         };
@@ -80,12 +105,16 @@ $(function() {
             self._processStateData(data.state);
         };
 
-        self.openOrCloseOnStateChange = function() {
+        self.openOrCloseOnStateChange = function(force) {
+            if (!self._startupComplete && !force) return;
+
             var connectionTab = $("#connection");
             if (self.isOperational() && connectionTab.hasClass("in")) {
                 connectionTab.collapse("hide");
+                self.refreshVisible(false);
             } else if (!self.isOperational() && !connectionTab.hasClass("in")) {
                 connectionTab.collapse("show");
+                self.refreshVisible(true);
             }
         };
 
@@ -100,7 +129,7 @@ $(function() {
             self.isReady(data.flags.ready);
             self.isLoading(data.flags.loading);
 
-            if (self.loginState.isUser() && self.previousIsOperational !== self.isOperational()) {
+            if (self.previousIsOperational !== self.isOperational()) {
                 // only open or close if the panel is visible (for admins) and
                 // the state just changed to avoid thwarting manual open/close
                 self.openOrCloseOnStateChange();
@@ -125,27 +154,64 @@ $(function() {
                         self.settings.printerProfiles.requestData();
                     });
             } else {
-                self.requestData();
-                OctoPrint.connection.disconnect();
+                if (!self.isPrinting() && !self.isPaused()) {
+                    self.requestData();
+                    OctoPrint.connection.disconnect();
+                } else {
+                    showConfirmationDialog({
+                        title: gettext("Are you sure?"),
+                        message: gettext("<p><strong>You are about to disconnect from the printer while a print "
+                            + "is in progress.</strong></p>"
+                            + "<p>Disconnecting while a print is in progress will prevent OctoPrint from "
+                            + "completing the print. If you're printing from an SD card attached directly "
+                            + "to the printer, any attempt to restart OctoPrint or reconnect to the printer "
+                            + "could interrupt the print.<p>"),
+                        question: gettext("Are you sure you want to disconnect from the printer?"),
+                        cancel: gettext("Stay Connected"),
+                        proceed: gettext("Disconnect"),
+                        onproceed:  function() {
+                            self.requestData();
+                            OctoPrint.connection.disconnect();
+                        }
+                    })
+                }
             }
         };
 
-        self.onStartup = function() {
+        self.onEventSettingsUpdated = function() {
             self.requestData();
         };
 
-        self.onUserLoggedIn = function() {
-            self.openOrCloseOnStateChange();
+        self.onEventConnected = function() {
+            self.requestData();
         };
 
-        self.onUserLoggedOut = function() {
-            self.openOrCloseOnStateChange();
+        self.onEventDisconnected = function() {
+            self.requestData();
+        };
+
+        self.onStartup = function() {
+            var connectionTab = $("#connection");
+            connectionTab.on("show", function() {
+                self.refreshVisible(true);
+            });
+            connectionTab.on("hide", function() {
+                self.refreshVisible(false);
+            });
+        };
+
+        self.onStartupComplete = function() {
+            self.openOrCloseOnStateChange(true);
+        };
+
+        self.onUserPermissionsChanged = self.onUserLoggedIn = self.onUserLoggedOut = function() {
+            self.requestData();
         };
     }
 
     OCTOPRINT_VIEWMODELS.push({
         construct: ConnectionViewModel,
-        dependencies: ["loginStateViewModel", "settingsViewModel", "printerProfilesViewModel"],
+        dependencies: ["loginStateViewModel", "settingsViewModel", "printerProfilesViewModel", "accessViewModel"],
         elements: ["#connection_wrapper"]
     });
 });

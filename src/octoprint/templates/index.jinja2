@@ -4,17 +4,58 @@
         <title data-bind="text: title">OctoPrint</title>
 
         <link rel="shortcut icon" href="{{ url_for('static', filename='img/tentacle-32x32.png') }}">
-        <link rel="mask-icon" href="{{ url_for('static', filename='img/favicon.svg') }}" color="#56BE37">
+        <link rel="mask-icon" href="{{ url_for('static', filename='img/mask.svg') }}" color="#56BE37">
+        <link rel="mask-icon-theme" href="{{ url_for('static', filename='img/mask-theme.svg') }}" color="#56BE37">
         <link rel="apple-touch-icon" sizes="114x114" href="{{ url_for('static', filename='img/apple-touch-icon-114x114.png') }}">
         <link rel="apple-touch-icon" sizes="144x144" href="{{ url_for('static', filename='img/apple-touch-icon-144x144.png') }}">
 
         <meta name="robots" content="noindex, nofollow, noimageindex">
+        <meta name="referrer" content="no-referrer">
+        <meta name="theme-color" data-bind="attr: { content: theme_color }">
 
         {% include 'stylesheets.jinja2' %}
         {% include 'initscript.jinja2' %}
     </head>
     <body>
-        <div class="page-container">
+        <noscript>
+            <style type="text/css">
+                #page-container-main,
+                #page-container-loading {
+                    display:none;
+                }
+            </style>
+            <div id="page-container-noscript">
+                <div class="wrapper">
+                    <div class="outer">
+                        <div class="inner">
+                            <div class="content">
+                                <h1 class="text-error">{{ _('You don\'t seem to have JavaScript enabled') }}</h1>
+                                {{ _('OctoPrint\'s UI requires JavaScript to work. Please enable JavaScript and reload.') }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </noscript>
+
+        {% if enableLoadingAnimation %}
+        <div id="page-container-loading" data-bind="visible: loading">
+            <div class="wrapper">
+                <div class="outer">
+                    <div class="inner">
+                        <div class="content">
+                            <h1 id="page-container-loading-header">{{ _('Connecting to OctoPrint\'s server...') }}</h1>
+                            <i id="page-container-loading-spinner" class="fa fa-spinner fa-spin fa-4x"></i>
+                            <p id="page-container-loading-error" style="display: none"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="page-container" id="page-container-main" {% if enableLoadAnimation %}style="display: none"{% endif %} data-bind="visible: visible">
+            <!-- ko allowBindings: false -->
             <div id="navbar" class="navbar navbar-static-top">
                 <div class="navbar-inner" data-bind="css: appearanceClasses">
                     <div class="container">
@@ -43,7 +84,7 @@
                 <div class="row">
                     <!-- Sidebar -->
                     {% if templates.sidebar.order %}
-                    <div class="accordion {% if templates.tab.order %}span4{% else %}span12{% endif %}">
+                    <div id="sidebar" class="accordion {% if templates.tab.order %}span4{% else %}span12{% endif %}">
                         {% for key in templates.sidebar.order %}
                             {% set entry, data = templates.sidebar.entries[key] %}
                             {% if "custom_bindings" not in data or data["custom_bindings"] %}<!-- ko allowBindings: false -->{% endif %}
@@ -82,7 +123,7 @@
                                 {% set entry, data = templates.tab.entries[key] %}
                                 {% if "custom_bindings" not in data or data["custom_bindings"] %}<!-- ko allowBindings: false -->{% endif %}
                                 <li id="{{ data._div }}_link"
-                                    class="{% if loop.first %}active{% endif %} {% if "classes_link" in data %}{{ data.classes_link|join(' ') }}{% elif "classes" in data %}{{ data.classes|join(' ') }}{% endif %}"
+                                    class="{% if "classes_link" in data %}{{ data.classes_link|join(' ') }}{% elif "classes" in data %}{{ data.classes|join(' ') }}{% endif %}"
                                     {% if "data_bind" in data %}data-bind="{{ data.data_bind }}"{% endif %}
                                     {% if "styles_link" in data %} style="{{ data.styles_link|join(', ') }}" {% elif "styles" in data %} style="{{ data.styles|join(', ') }}" {% endif %}
                                         >
@@ -115,10 +156,9 @@
                     </ul>
                     <ul id="footer_links" class="pull-right">
                         <li><a href="https://octoprint.org" target="_blank" rel="noreferrer noopener"><i class="fa fa-home"></i> {{ _('Homepage') }}</a></li>
-                        <li><a href="https://github.com/foosel/OctoPrint/" target="_blank" rel="noreferrer noopener"><i class="fa fa-github"></i> {{ _('Source') }}</a></li>
+                        <li><a href="https://community.octoprint.org" target="_blank" rel="noreferrer noopener"><i class="fa fa-users"></i> {{ _('Forum') }}</a></li>
+                        <li><a href="https://faq.octoprint.org" target="_blank" rel="noreferrer noopener"><i class="fa fa-question-circle"></i> {{ _('FAQ') }}</a></li>
                         <li><a href="http://docs.octoprint.org" target="_blank" rel="noreferrer noopener"><i class="fa fa-book"></i> {{ _('Docs') }}</a></li>
-                        <li><a href="https://github.com/foosel/OctoPrint/issues" target="_blank" rel="noreferrer noopener"><i class="fa fa-flag"></i> {{ _('Issues') }}</a></li>
-                        <li><a href="https://github.com/foosel/OctoPrint/wiki/FAQ" target="_blank" rel="noreferrer noopener"><i class="fa fa-question-circle"></i> {{ _('FAQ') }}</a></li>
                         <li id="footer_about"><a href="javascript:void(0)" data-bind="click: show"><i class="fa fa-info-circle"></i> {{ _('About') }}</a></li>
                     </ul>
                 </div>
@@ -140,14 +180,16 @@
             {% include 'overlays/reloadui.jinja2' %}
             <!-- End of overlays -->
 
+            {% include 'javascripts.jinja2' %}
+
             <!-- Generic plugin template files -->
             {% for key in templates.generic.order %}
                 {% set data = templates.generic.entries[key] %}
                 {% try "<!-- There was an error with the template {filename} at line number {lineno}: {exception} -->" %}{% include data.template ignore missing %}{% endtry %}
             {% endfor %}
             <!-- End of generic plugin template files -->
-
-            {% include 'javascripts.jinja2' %}
+            <!-- /ko -->
         </div>
+
     </body>
 </html>

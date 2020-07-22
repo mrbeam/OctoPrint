@@ -1,9 +1,9 @@
-# coding=utf-8
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 """
 This module holds the standard implementation of the :class:`PrinterInterface` and it helpers.
 """
-
-from __future__ import absolute_import, division, print_function
 
 __author__ = "Gina Häußge <osd@foosel.net>"
 __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agpl.html'
@@ -15,18 +15,22 @@ import os
 import threading
 import time
 
-from past.builtins import basestring
+from past.builtins import basestring, long
+
+from frozendict import frozendict
 
 from octoprint import util as util
 from octoprint.events import eventManager, Events
 from octoprint.filemanager import FileDestinations, NoSuchStorage, valid_file_type
 from octoprint.plugin import plugin_manager, ProgressPlugin
 from octoprint.printer import PrinterInterface, PrinterCallback, UnknownScript, InvalidFileLocation, InvalidFileType
-from octoprint.printer.estimation import TimeEstimationHelper
+from octoprint.printer.estimation import PrintTimeEstimator
 from octoprint.settings import settings
 from octoprint.util import comm as comm
 from octoprint.util import InvariantContainer
 from octoprint.util import to_unicode
+from octoprint.util import monotonic_time
+from octoprint.util import get_fully_qualified_classname as fqcn
 
 
 class Printer(PrinterInterface, comm.MachineComPrintCallback):
@@ -39,6 +43,9 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		from collections import deque
 
 		self._logger = logging.getLogger(__name__)
+		self._logger_job = logging.getLogger("{}.job".format(__name__))
+
+		self._dict = frozendict if settings().getBoolean(["devel", "useFrozenDictForPrinterState"]) else dict
 
 		self._analysisQueue = analysisQueue
 		self._fileManager = fileManager
@@ -48,8 +55,10 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		# TODO do we really need to hold the temperature here?
 		self._temp = None
 		self._bedTemp = None
+		self._chamberTemp = None
 		self._targetTemp = None
 		self._targetBedTemp = None
+		self._targetChamberTemp = None
 		self._temps = TemperatureHistory(cutoff=settings().getInt(["temperature", "cutoff"])*60)
 		self._tempBacklog = []
 
@@ -73,13 +82,25 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		self._streamingFinishedCallback = None
 		self._streamingFailedCallback = None
 
+		# job handling & estimation
 		self._selectedFileMutex = threading.RLock()
 		self._selectedFile = None
-		self._timeEstimationData = None
-		self._timeEstimationStatsWeighingUntil = settings().getFloat(["estimation", "printTime", "statsWeighingUntil"])
-		self._timeEstimationValidityRange = settings().getFloat(["estimation", "printTime", "validityRange"])
-		self._timeEstimationForceDumbFromPercent = settings().getFloat(["estimation", "printTime", "forceDumbFromPercent"])
-		self._timeEstimationForceDumbAfterMin = settings().getFloat(["estimation", "printTime", "forceDumbAfterMin"])
+
+		self._estimator_factory = PrintTimeEstimator
+		self._estimator = None
+		analysis_queue_hooks = plugin_manager().get_hooks("octoprint.printer.estimation.factory")
+		for name, hook in analysis_queue_hooks.items():
+			try:
+				estimator = hook()
+				if estimator is not None:
+					self._logger.info("Using print time estimator provided by {}".format(name))
+					self._estimator_factory = estimator
+			except Exception:
+				self._logger.exception("Error while processing analysis queues from {}".format(name),
+				                       extra=dict(plugin=name))
+
+		#hook card upload
+		self.sd_card_upload_hooks = plugin_manager().get_hooks("octoprint.printer.sdcardupload")
 
 		# comm
 		self._comm = None
@@ -100,62 +121,91 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			on_get_progress=self._updateProgressDataCallback
 		)
 		self._stateMonitor.reset(
-			state={"text": self.get_state_string(), "flags": self._getStateFlags()},
-			job_data={
-				"file": {
-					"name": None,
-					"path": None,
-					"size": None,
-					"origin": None,
-					"date": None
-				},
-				"estimatedPrintTime": None,
-				"lastPrintTime": None,
-				"filament": {
-					"length": None,
-					"volume": None
-				}
-			},
-			progress={"completion": None, "filepos": None, "printTime": None, "printTimeLeft": None},
+			state=self._dict(text=self.get_state_string(), flags=self._getStateFlags()),
+			job_data=self._dict(file=self._dict(name=None,
+			                                    path=None,
+			                                    size=None,
+			                                    origin=None,
+			                                    date=None),
+			                    estimatedPrintTime=None,
+			                    lastPrintTime=None,
+			                    filament=self._dict(length=None,
+			                                        volume=None),
+			                    user=None),
+			progress=self._dict(completion=None,
+			                    filepos=None,
+			                    printTime=None,
+			                    printTimeLeft=None,
+			                    printTimeOrigin=None),
 			current_z=None,
-			offsets=dict()
+			offsets=self._dict()
 		)
 
 		eventManager().subscribe(Events.METADATA_ANALYSIS_FINISHED, self._on_event_MetadataAnalysisFinished)
 		eventManager().subscribe(Events.METADATA_STATISTICS_UPDATED, self._on_event_MetadataStatisticsUpdated)
 
+	def _create_estimator(self, job_type=None):
+		if job_type is None:
+			with self._selectedFileMutex:
+				if self._selectedFile is None:
+					return
+
+				if self._selectedFile["sd"]:
+					job_type = "sdcard"
+				else:
+					job_type = "local"
+
+		self._estimator = self._estimator_factory(job_type)
+
 	#~~ handling of PrinterCallbacks
 
-	def register_callback(self, callback):
+	def register_callback(self, callback, *args, **kwargs):
 		if not isinstance(callback, PrinterCallback):
-			self._logger.warn("Registering an object as printer callback which doesn't implement the PrinterCallback interface")
-
+			self._logger.warning("Registering an object as printer callback which doesn't implement the PrinterCallback interface")
 		self._callbacks.append(callback)
-		self._sendInitialStateUpdate(callback)
 
-	def unregister_callback(self, callback):
-		if callback in self._callbacks:
+	def unregister_callback(self, callback, *args, **kwargs):
+		try:
 			self._callbacks.remove(callback)
+		except ValueError:
+			# not registered
+			pass
+
+	def send_initial_callback(self, callback):
+		if callback in self._callbacks:
+			self._sendInitialStateUpdate(callback)
 
 	def _sendAddTemperatureCallbacks(self, data):
 		for callback in self._callbacks:
-			try: callback.on_printer_add_temperature(data)
-			except: self._logger.exception("Exception while adding temperature data point")
+			try:
+				callback.on_printer_add_temperature(data)
+			except Exception:
+				self._logger.exception("Exception while adding temperature data point to callback {}".format(callback),
+				                       extra=dict(callback=fqcn(callback)))
 
 	def _sendAddLogCallbacks(self, data):
 		for callback in self._callbacks:
-			try: callback.on_printer_add_log(data)
-			except: self._logger.exception("Exception while adding communication log entry")
+			try:
+				callback.on_printer_add_log(data)
+			except Exception:
+				self._logger.exception("Exception while adding communication log entry to callback {}".format(callback),
+				                       extra=dict(callback=fqcn(callback)))
 
 	def _sendAddMessageCallbacks(self, data):
 		for callback in self._callbacks:
-			try: callback.on_printer_add_message(data)
-			except: self._logger.exception("Exception while adding printer message")
+			try:
+				callback.on_printer_add_message(data)
+			except Exception:
+				self._logger.exception("Exception while adding printer message to callback {}".format(callback),
+				                       extra=dict(callback=fqcn(callback)))
 
 	def _sendCurrentDataCallbacks(self, data):
 		for callback in self._callbacks:
-			try: callback.on_printer_send_current_data(copy.deepcopy(data))
-			except: self._logger.exception("Exception while pushing current data")
+			try:
+				callback.on_printer_send_current_data(copy.deepcopy(data))
+			except Exception:
+				self._logger.exception("Exception while pushing current data to callback {}".format(callback),
+				                       extra=dict(callback=fqcn(callback)))
 
 	#~~ callback from metadata analysis event
 
@@ -164,14 +214,16 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			if self._selectedFile:
 				self._setJobData(self._selectedFile["filename"],
 								 self._selectedFile["filesize"],
-								 self._selectedFile["sd"])
+								 self._selectedFile["sd"],
+								 self._selectedFile["user"])
 
 	def _on_event_MetadataStatisticsUpdated(self, event, data):
 		with self._selectedFileMutex:
 			if self._selectedFile:
 				self._setJobData(self._selectedFile["filename"],
 				                 self._selectedFile["filesize"],
-				                 self._selectedFile["sd"])
+				                 self._selectedFile["sd"],
+				                 self._selectedFile["user"])
 
 	#~~ progress plugin reporting
 
@@ -187,8 +239,9 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			for plugin in self._progressPlugins:
 				try:
 					plugin.on_print_progress(storage, filename, progress)
-				except:
-					self._logger.exception("Exception while sending print progress to plugin %s" % plugin._identifier)
+				except Exception:
+					self._logger.exception("Exception while sending print progress to plugin %s" % plugin._identifier,
+					                       extra=dict(plugin=plugin._identifier))
 
 		thread = threading.Thread(target=call_plugins, args=(storage, filename, progress))
 		thread.daemon = False
@@ -196,7 +249,7 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 
 	#~~ PrinterInterface implementation
 
-	def connect(self, port=None, baudrate=None, profile=None):
+	def connect(self, port=None, baudrate=None, profile=None, *args, **kwargs):
 		"""
 		 Connects to the printer. If port and/or baudrate is provided, uses these settings, otherwise autodetection
 		 will be attempted.
@@ -215,7 +268,7 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 
 		self._comm = comm.MachineCom(port, baudrate, callbackObject=self, printerProfileManager=self._printerProfileManager)
 
-	def disconnect(self):
+	def disconnect(self, *args, **kwargs):
 		"""
 		 Closes the connection to the printer.
 		"""
@@ -225,7 +278,7 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		else:
 			eventManager().fire(Events.DISCONNECTED)
 
-	def get_transport(self):
+	def get_transport(self, *args, **kwargs):
 
 		if self._comm is None:
 			return None
@@ -233,13 +286,23 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		return self._comm.getTransport()
 	getTransport = util.deprecated("getTransport has been renamed to get_transport", since="1.2.0-dev-590", includedoc="Replaced by :func:`get_transport`")
 
-	def fake_ack(self):
+	def job_on_hold(self, blocking=True, *args, **kwargs):
+		if self._comm is None:
+			raise RuntimeError("No connection to the printer")
+		return self._comm.job_put_on_hold(blocking=blocking)
+
+	def set_job_on_hold(self, value, blocking=True, *args, **kwargs):
+		if self._comm is None:
+			raise RuntimeError("No connection to the printer")
+		return self._comm.set_job_on_hold(value, blocking=blocking)
+
+	def fake_ack(self, *args, **kwargs):
 		if self._comm is None:
 			return
 
 		self._comm.fakeOk()
 
-	def commands(self, commands):
+	def commands(self, commands, *args, **kwargs):
 		"""
 		Sends one or more gcode commands to the printer.
 		"""
@@ -250,16 +313,19 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			commands = [commands]
 
 		for command in commands:
-			self._comm.sendCommand(command)
+			self._comm.sendCommand(command, tags=kwargs.get("tags", set()) | {"trigger:printer.commands"})
 
-	def script(self, name, context=None, must_be_set=True):
+	def script(self, name, context=None, must_be_set=True, part_of_job=False, *args, **kwargs):
 		if self._comm is None:
 			return
 
 		if name is None or not name:
 			raise ValueError("name must be set")
 
-		result = self._comm.sendGcodeScript(name, replacements=context)
+		result = self._comm.sendGcodeScript(name,
+		                                    part_of_job=part_of_job,
+		                                    replacements=context,
+		                                    tags=kwargs.get("tags", set()) | {"trigger:printer.script"})
 		if not result and must_be_set:
 			raise UnknownScript(name)
 
@@ -284,7 +350,7 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			if not axis in PrinterInterface.valid_axes:
 				raise ValueError("Invalid axis {}, valid axes are {}".format(axis, ", ".join(PrinterInterface.valid_axes)))
 
-		command = "G1 {}".format(" ".join(["{}{}".format(axis.upper(), amount) for axis, amount in axes.items()]))
+		command = "G1 {}".format(" ".join(["{}{}".format(axis.upper(), amt) for axis, amt in axes.items()]))
 
 		if speed is None:
 			printer_profile = self._printerProfileManager.get_current_or_default()
@@ -298,42 +364,56 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		else:
 			commands = ["G90", command]
 
-		self.commands(commands)
+		self.commands(commands, tags=kwargs.get("tags", set()) | {"trigger:printer.jog"})
 
-	def home(self, axes):
+	def home(self, axes, *args, **kwargs):
 		if not isinstance(axes, (list, tuple)):
-			if isinstance(axes, (str, unicode)):
+			if isinstance(axes, basestring):
 				axes = [axes]
 			else:
 				raise ValueError("axes is neither a list nor a string: {axes}".format(axes=axes))
 
-		validated_axes = filter(lambda x: x in PrinterInterface.valid_axes, map(lambda x: x.lower(), axes))
+		validated_axes = list(filter(lambda x: x in PrinterInterface.valid_axes, map(lambda x: x.lower(), axes)))
 		if len(axes) != len(validated_axes):
 			raise ValueError("axes contains invalid axes: {axes}".format(axes=axes))
 
-		self.commands(["G91", "G28 %s" % " ".join(map(lambda x: "%s0" % x.upper(), validated_axes)), "G90"])
+		self.commands(["G91", "G28 %s" % " ".join(map(lambda x: "%s0" % x.upper(), validated_axes)), "G90"],
+		              tags=kwargs.get("tags", set) | {"trigger:printer.home"})
 
-	def extrude(self, amount):
+	def extrude(self, amount, speed=None, *args, **kwargs):
 		if not isinstance(amount, (int, long, float)):
 			raise ValueError("amount must be a valid number: {amount}".format(amount=amount))
 
 		printer_profile = self._printerProfileManager.get_current_or_default()
-		extrusion_speed = printer_profile["axes"]["e"]["speed"]
-		self.commands(["G91", "G1 E%s F%d" % (amount, extrusion_speed), "G90"])
 
-	def change_tool(self, tool):
+		# Use specified speed (if any)
+		max_e_speed = printer_profile["axes"]["e"]["speed"]
+
+		if speed is None:
+			# No speed was specified so default to value configured in printer profile
+			extrusion_speed = max_e_speed
+		else:
+			# Make sure that specified value is not greater than maximum as defined in printer profile
+			extrusion_speed = min([speed, max_e_speed])
+
+		self.commands(["G91", "G1 E%s F%d" % (amount, extrusion_speed), "G90"],
+		              tags=kwargs.get("tags", set()) | {"trigger:printer.extrude"})
+
+	def change_tool(self, tool, *args, **kwargs):
 		if not PrinterInterface.valid_tool_regex.match(tool):
 			raise ValueError("tool must match \"tool[0-9]+\": {tool}".format(tool=tool))
 
 		tool_num = int(tool[len("tool"):])
-		self.commands("T%d" % tool_num)
+		self.commands("T%d" % tool_num, tags=kwargs.get("tags", set()) | {"trigger:printer.change_tool"})
 
-	def set_temperature(self, heater, value):
+	def set_temperature(self, heater, value, *args, **kwargs):
 		if not PrinterInterface.valid_heater_regex.match(heater):
-			raise ValueError("heater must match \"tool[0-9]+\" or \"bed\": {heater}".format(heater=heater))
+			raise ValueError("heater must match \"tool[0-9]+\", \"bed\" or \"chamber\": {heater}".format(heater=heater))
 
 		if not isinstance(value, (int, long, float)) or value < 0:
 			raise ValueError("value must be a valid number >= 0: {value}".format(value=value))
+
+		tags = kwargs.get("tags", set()) | {"trigger:printer.set_temperature"}
 
 		if heater.startswith("tool"):
 			printer_profile = self._printerProfileManager.get_current_or_default()
@@ -341,22 +421,29 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			shared_nozzle = printer_profile["extruder"]["sharedNozzle"]
 			if extruder_count > 1 and not shared_nozzle:
 				toolNum = int(heater[len("tool"):])
-				self.commands("M104 T{} S{}".format(toolNum, value))
+				self.commands("M104 T{} S{}".format(toolNum, value),
+				              tags=tags)
 			else:
-				self.commands("M104 S{}".format(value))
+				self.commands("M104 S{}".format(value),
+				              tags=tags)
 
 		elif heater == "bed":
-			self.commands("M140 S{}".format(value))
+			self.commands("M140 S{}".format(value),
+			              tags=tags)
 
-	def set_temperature_offset(self, offsets=None):
+		elif heater == "chamber":
+			self.commands("M141 S{}".format(value),
+			              tags=tags)
+
+	def set_temperature_offset(self, offsets=None, *args, **kwargs):
 		if offsets is None:
 			offsets = dict()
 
 		if not isinstance(offsets, dict):
 			raise ValueError("offsets must be a dict")
 
-		validated_keys = filter(lambda x: PrinterInterface.valid_heater_regex.match(x), offsets.keys())
-		validated_values = filter(lambda x: isinstance(x, (int, long, float)), offsets.values())
+		validated_keys = list(filter(lambda x: PrinterInterface.valid_heater_regex.match(x), offsets.keys()))
+		validated_values = list(filter(lambda x: isinstance(x, (int, long, float)), offsets.values()))
 
 		if len(validated_keys) != len(offsets):
 			raise ValueError("offsets contains invalid keys: {offsets}".format(offsets=offsets))
@@ -381,38 +468,53 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 
 		return factor
 
-	def feed_rate(self, factor):
+	def feed_rate(self, factor, *args, **kwargs):
 		factor = self._convert_rate_value(factor, min=50, max=200)
-		self.commands("M220 S%d" % factor)
+		self.commands("M220 S%d" % factor,
+		              tags=kwargs.get("tags", set()) | {"trigger:printer.feed_rate"})
 
-	def flow_rate(self, factor):
+	def flow_rate(self, factor, *args, **kwargs):
 		factor = self._convert_rate_value(factor, min=75, max=125)
-		self.commands("M221 S%d" % factor)
+		self.commands("M221 S%d" % factor,
+		              tags=kwargs.get("tags", set()) | {"trigger:printer.flow_rate"})
 
-	def select_file(self, path, sd, printAfterSelect=False, pos=None):
+	def select_file(self, path, sd, printAfterSelect=False, user=None, pos=None, *args, **kwargs):
 		if self._comm is None or (self._comm.isBusy() or self._comm.isStreaming()):
 			self._logger.info("Cannot load file: printer not connected or currently busy")
 			return
 
 		self._validateJob(path, sd)
 
-		recovery_data = self._fileManager.get_recovery_data()
-		if recovery_data:
-			# clean up recovery data if we just selected a different file than is logged in that
-			expected_origin = FileDestinations.SDCARD if sd else FileDestinations.LOCAL
-			actual_origin = recovery_data.get("origin", None)
-			actual_path = recovery_data.get("path", None)
+		origin = FileDestinations.SDCARD if sd else FileDestinations.LOCAL
+		if sd:
+			path_on_disk = "/" + path
+			path_in_storage = path
+		else:
+			path_on_disk = self._fileManager.path_on_disk(origin, path)
+			path_in_storage = self._fileManager.path_in_storage(origin, path_on_disk)
 
-			if actual_origin is None or actual_path is None or actual_origin != expected_origin or actual_path != path:
-				self._fileManager.delete_recovery_data()
+		try:
+			recovery_data = self._fileManager.get_recovery_data()
+			if recovery_data:
+				# clean up recovery data if we just selected a different file
+				actual_origin = recovery_data.get("origin", None)
+				actual_path = recovery_data.get("path", None)
+
+				if actual_origin is None or actual_path is None or actual_origin != origin or actual_path != path_in_storage:
+					self._fileManager.delete_recovery_data()
+		except Exception:
+			# anything goes wrong with the recovery data, we ignore it
+			self._logger.exception("Something was wrong with processing the recovery data")
 
 		self._printAfterSelect = printAfterSelect
 		self._posAfterSelect = pos
-		self._comm.selectFile("/" + path if sd else path, sd)
+		self._comm.selectFile("/" + path if sd else path_on_disk, sd,
+		                      user=user,
+		                      tags=kwargs.get("tags", set()) | {"trigger:printer.select_file"})
 		self._updateProgressData()
 		self._setCurrentZ(None)
 
-	def unselect_file(self):
+	def unselect_file(self, *args, **kwargs):
 		if self._comm is not None and (self._comm.isBusy() or self._comm.isStreaming()):
 			return
 
@@ -430,42 +532,28 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 
 		return self._comm.getFilePosition()
 
-	def start_print(self, pos=None):
+	def start_print(self, pos=None, user=None, *args, **kwargs):
 		"""
 		 Starts the currently loaded print job.
 		 Only starts if the printer is connected and operational, not currently printing and a printjob is loaded
 		"""
 		if self._comm is None or not self._comm.isOperational() or self._comm.isPrinting():
 			return
+
 		with self._selectedFileMutex:
 			if self._selectedFile is None:
 				return
-
-		# we are happy if the average of the estimates stays within 60s of the prior one
-		threshold = settings().getFloat(["estimation", "printTime", "stableThreshold"])
-		rolling_window = None
-		countdown = None
-
-		with self._selectedFileMutex:
-			if self._selectedFile["sd"]:
-				# we are interesting in a rolling window of roughly the last 15s, so the number of entries has to be derived
-				# by that divided by the sd status polling interval
-				rolling_window = 15 / settings().get(["serial", "timeout", "sdStatus"])
-
-				# we are happy when one rolling window has been stable
-				countdown = rolling_window
-		self._timeEstimationData = TimeEstimationHelper(rolling_window=rolling_window,
-		                                                threshold=threshold,
-		                                                countdown=countdown)
 
 		self._fileManager.delete_recovery_data()
 
 		self._lastProgressReport = None
 		self._updateProgressData()
 		self._setCurrentZ(None)
-		self._comm.startPrint(pos=pos)
+		self._comm.startPrint(pos=pos,
+		                      user=user,
+		                      tags=kwargs.get("tags", set()) | {"trigger:printer.start_print"})
 
-	def pause_print(self):
+	def pause_print(self, user=None, *args, **kwargs):
 		"""
 		Pause the current printjob.
 		"""
@@ -475,9 +563,11 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		if self._comm.isPaused():
 			return
 
-		self._comm.setPause(True)
+		self._comm.setPause(True,
+		                    user=user,
+		                    tags=kwargs.get("tags", set()) | {"trigger:printer.pause_print"})
 
-	def resume_print(self):
+	def resume_print(self, user=None, *args, **kwargs):
 		"""
 		Resume the current printjob.
 		"""
@@ -487,9 +577,11 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		if not self._comm.isPaused():
 			return
 
-		self._comm.setPause(False)
+		self._comm.setPause(False,
+		                    user=user,
+		                    tags=kwargs.get("tags", set()) | {"trigger:printer.resume_print"})
 
-	def cancel_print(self):
+	def cancel_print(self, user=None, *args, **kwargs):
 		"""
 		 Cancel the current printjob.
 		"""
@@ -498,28 +590,35 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 
 		# tell comm layer to cancel - will also trigger our cancelled handler
 		# for further processing
-		self._comm.cancelPrint()
+		self._comm.cancelPrint(user=user,
+		                       tags=kwargs.get("tags", set()) | {"trigger:printer.cancel_print"})
 
-	def get_state_string(self, state=None):
+	def log_lines(self, *lines):
+		serial_logger = logging.getLogger("SERIAL")
+		self.on_comm_log("\n".join(lines))
+		for line in lines:
+			serial_logger.debug(line)
+
+	def get_state_string(self, state=None, *args, **kwargs):
 		if self._comm is None:
 			return "Offline"
 		else:
 			return self._comm.getStateString(state=state)
 
-	def get_state_id(self, state=None):
+	def get_state_id(self, state=None, *args, **kwargs):
 		if self._comm is None:
 			return "OFFLINE"
 		else:
 			return self._comm.getStateId(state=state)
 
-	def get_current_data(self):
-		return self._stateMonitor.get_current_data()
+	def get_current_data(self, *args, **kwargs):
+		return util.thaw_frozendict(self._stateMonitor.get_current_data())
 
-	def get_current_job(self):
+	def get_current_job(self, *args, **kwargs):
 		currentData = self._stateMonitor.get_current_data()
-		return currentData["job"]
+		return util.thaw_frozendict(currentData["job"])
 
-	def get_current_temperatures(self):
+	def get_current_temperatures(self, *args, **kwargs):
 		if self._comm is not None:
 			offsets = self._comm.getOffsets()
 		else:
@@ -539,13 +638,19 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 				"target": self._bedTemp[1],
 				"offset": offsets["bed"] if "bed" in offsets and offsets["bed"] is not None else 0
 			}
+		if self._chamberTemp is not None:
+			result["chamber"] = {
+				"actual": self._chamberTemp[0],
+				"target": self._chamberTemp[1],
+				"offset": offsets["chamber"] if "chamber" in offsets and offsets["chamber"] is not None else 0
+			}
 
 		return result
 
-	def get_temperature_history(self):
+	def get_temperature_history(self, *args, **kwargs):
 		return self._temps
 
-	def get_current_connection(self):
+	def get_current_connection(self, *args, **kwargs):
 		if self._comm is None:
 			return "Closed", None, None, None
 
@@ -553,25 +658,37 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		printer_profile = self._printerProfileManager.get_current_or_default()
 		return self._comm.getStateString(), port, baudrate, printer_profile
 
-	def is_closed_or_error(self):
+	def is_closed_or_error(self, *args, **kwargs):
 		return self._comm is None or self._comm.isClosedOrError()
 
-	def is_operational(self):
+	def is_operational(self, *args, **kwargs):
 		return self._comm is not None and self._comm.isOperational()
 
-	def is_printing(self):
+	def is_printing(self, *args, **kwargs):
 		return self._comm is not None and self._comm.isPrinting()
 
-	def is_paused(self):
+	def is_cancelling(self, *args, **kwargs):
+		return self._comm is not None and self._comm.isCancelling()
+
+	def is_pausing(self, *args, **kwargs):
+		return self._comm is not None and self._comm.isPausing()
+
+	def is_paused(self, *args, **kwargs):
 		return self._comm is not None and self._comm.isPaused()
 
-	def is_error(self):
+	def is_resuming(self, *args, **kwargs):
+		return self._comm is not None and self._comm.isResuming()
+
+	def is_finishing(self, *args, **kwargs):
+		return self._comm is not None and self._comm.isFinishing()
+
+	def is_error(self, *args, **kwargs):
 		return self._comm is not None and self._comm.isError()
 
-	def is_ready(self):
+	def is_ready(self, *args, **kwargs):
 		return self.is_operational() and not self.is_printing() and not self._comm.isStreaming()
 
-	def is_sd_ready(self):
+	def is_sd_ready(self, *args, **kwargs):
 		if not settings().getBoolean(["feature", "sdSupport"]) or self._comm is None:
 			return False
 		else:
@@ -579,12 +696,12 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 
 	#~~ sd file handling
 
-	def get_sd_files(self):
+	def get_sd_files(self, *args, **kwargs):
 		if self._comm is None or not self._comm.isSdReady():
 			return []
-		return map(lambda x: (x[0][1:], x[1]), self._comm.getSdFiles())
+		return list(map(lambda x: (x[0][1:], x[1]), self._comm.getSdFiles()))
 
-	def add_sd_file(self, filename, absolutePath, on_success=None, on_failure=None):
+	def add_sd_file(self, filename, path, on_success=None, on_failure=None, *args, **kwargs):
 		if not self._comm or self._comm.isBusy() or not self._comm.isSdReady():
 			self._logger.error("No connection to printer or printer is busy")
 			return
@@ -592,38 +709,86 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		self._streamingFinishedCallback = on_success
 		self._streamingFailedCallback = on_failure
 
+		def sd_upload_started(local_filename, remote_filename):
+			eventManager().fire(Events.TRANSFER_STARTED, dict(local=local_filename,
+			                                                  remote=remote_filename))
+
+		def sd_upload_succeeded(local_filename, remote_filename, elapsed):
+			payload = dict(local=local_filename,
+			               remote=remote_filename,
+			               time=elapsed)
+			eventManager().fire(Events.TRANSFER_DONE, payload)
+			if callable(self._streamingFinishedCallback):
+				self._streamingFinishedCallback(remote_filename, remote_filename, FileDestinations.SDCARD)
+
+		def sd_upload_failed(local_filename, remote_filename, elapsed):
+			payload = dict(local=local_filename,
+			               remote=remote_filename,
+			               time=elapsed)
+			eventManager().fire(Events.TRANSFER_FAILED, payload)
+			if callable(self._streamingFailedCallback):
+				self._streamingFailedCallback(remote_filename, remote_filename, FileDestinations.SDCARD)
+
+		for name, hook in self.sd_card_upload_hooks.items():
+			# first sd card upload plugin that feels responsible gets the job
+			try:
+				result = hook(self, filename, path, sd_upload_started, sd_upload_succeeded, sd_upload_failed,
+				              *args, **kwargs)
+				if result is not None:
+					return result
+			except Exception:
+				self._logger.exception("There was an error running the sd upload "
+				                       "hook provided by plugin {}".format(name),
+				                       extra=dict(plugin=name))
+
+		else:
+			# no plugin feels responsible, use the default implementation
+			return self._add_sd_file(filename, path, tags=kwargs.get("tags"))
+
+	def _get_free_remote_name(self, filename):
 		self.refresh_sd_files(blocking=True)
-		existingSdFiles = map(lambda x: x[0], self._comm.getSdFiles())
+		existingSdFiles = list(map(lambda x: x[0], self._comm.getSdFiles()))
 
 		if valid_file_type(filename, "gcode"):
-			remoteName = util.get_dos_filename(filename,
-			                                   existing_filenames=existingSdFiles,
-			                                   extension="gco",
-			                                   whitelisted_extensions=["gco", "g"])
+			# figure out remote filename
+			remote_name = util.get_dos_filename(filename,
+			                                    existing_filenames=existingSdFiles,
+			                                    extension="gco",
+			                                    whitelisted_extensions=["gco", "g"])
 		else:
 			# probably something else added through a plugin, use it's basename as-is
-			remoteName = os.path.basename(filename)
-		self._timeEstimationData = TimeEstimationHelper()
-		self._comm.startFileTransfer(absolutePath, filename, "/" + remoteName, special=not valid_file_type(filename, "gcode"))
+			remote_name = os.path.basename(filename)
 
-		return remoteName
+		return remote_name
 
-	def delete_sd_file(self, filename):
+	def _add_sd_file(self, filename, path, tags=None):
+		if tags is None:
+			tags = set()
+
+		remote_name = self._get_free_remote_name(filename)
+		self._create_estimator("stream")
+		self._comm.startFileTransfer(path, filename, "/" + remote_name,
+		                             special=not valid_file_type(filename, "gcode"),
+		                             tags=tags | {"trigger:printer.add_sd_file"})
+
+		return remote_name
+
+	def delete_sd_file(self, filename, *args, **kwargs):
 		if not self._comm or not self._comm.isSdReady():
 			return
-		self._comm.deleteSdFile("/" + filename)
+		self._comm.deleteSdFile("/" + filename, tags=kwargs.get("tags", set()) | {"trigger:printer.delete_sd_file"})
 
-	def init_sd_card(self):
+	def init_sd_card(self, *args, **kwargs):
 		if not self._comm or self._comm.isSdReady():
 			return
-		self._comm.initSdCard()
+		self._comm.initSdCard(tags=kwargs.get("tags", set()) | {"trigger:printer.init_sd_card"})
 
-	def release_sd_card(self):
+	def release_sd_card(self, *args, **kwargs):
 		if not self._comm or not self._comm.isSdReady():
 			return
-		self._comm.releaseSdCard()
+		self._comm.releaseSdCard(tags=kwargs.get("tags", set()) | {"trigger:printer.release_sd_card"})
 
-	def refresh_sd_files(self, blocking=False):
+	def refresh_sd_files(self, blocking=False, *args, **kwargs):
 		"""
 		Refreshes the list of file stored on the SD card attached to printer (if available and printer communication
 		available). Optional blocking parameter allows making the method block (max 10s) until the file list has been
@@ -632,9 +797,9 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		if not self._comm or not self._comm.isSdReady():
 			return
 		self._sdFilelistAvailable.clear()
-		self._comm.refreshSdFiles()
+		self._comm.refreshSdFiles(tags=kwargs.get("tags", set()) | {"trigger:printer.refresh_sd_files"})
 		if blocking:
-			self._sdFilelistAvailable.wait(10000)
+			self._sdFilelistAvailable.wait(kwargs.get("timeout", 10000))
 
 	#~~ state monitoring
 
@@ -650,7 +815,7 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			state_string = self.get_state_string()
 
 		self._state = state
-		self._stateMonitor.set_state({"text": state_string, "flags": self._getStateFlags()})
+		self._stateMonitor.set_state(self._dict(text=state_string, flags=self._getStateFlags()))
 
 		payload = dict(
 			state_id=self.get_state_id(self._state),
@@ -666,25 +831,12 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		self._messages.append(message)
 		self._stateMonitor.add_message(message)
 
-	def _estimateTotalPrintTime(self, progress, printTime):
-		if not progress or not printTime or not self._timeEstimationData:
-			return None
-
-		else:
-			newEstimate = printTime / progress
-			self._timeEstimationData.update(newEstimate)
-
-			result = None
-			if self._timeEstimationData.is_stable():
-				result = self._timeEstimationData.average_total_rolling
-
-			return result
-
-	def _updateProgressData(self, completion=None, filepos=None, printTime=None, printTimeLeft=None):
-		self._stateMonitor.set_progress(dict(completion=int(completion * 100) if completion is not None else None,
-		                                     filepos=filepos,
-		                                     printTime=int(printTime) if printTime is not None else None,
-		                                     printTimeLeft=int(printTimeLeft) if printTimeLeft is not None else None))
+	def _updateProgressData(self, completion=None, filepos=None, printTime=None, printTimeLeft=None, printTimeLeftOrigin=None):
+		self._stateMonitor.set_progress(self._dict(completion=int(completion * 100) if completion is not None else None,
+		                                           filepos=filepos,
+		                                           printTime=int(printTime) if printTime is not None else None,
+		                                           printTimeLeft=int(printTimeLeft) if printTimeLeft is not None else None,
+		                                           printTimeLeftOrigin=printTimeLeftOrigin))
 
 	def _updateProgressDataCallback(self):
 		if self._comm is None:
@@ -698,170 +850,63 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			printTime = self._comm.getPrintTime()
 			cleanedPrintTime = self._comm.getCleanedPrintTime()
 
-		statisticalTotalPrintTime = None
-		statisticalTotalPrintTimeType = None
-		with self._selectedFileMutex:
-			if self._selectedFile and "estimatedPrintTime" in self._selectedFile \
-					and self._selectedFile["estimatedPrintTime"]:
-				statisticalTotalPrintTime = self._selectedFile["estimatedPrintTime"]
-				statisticalTotalPrintTimeType = self._selectedFile.get("estimatedPrintTimeType", None)
-
-		printTimeLeft, printTimeLeftOrigin = self._estimatePrintTimeLeft(progress, printTime, cleanedPrintTime, statisticalTotalPrintTime, statisticalTotalPrintTimeType)
-
+		printTimeLeft = printTimeLeftOrigin = None
+		estimator = self._estimator
 		if progress is not None:
 			progress_int = int(progress * 100)
 			if self._lastProgressReport != progress_int:
 				self._lastProgressReport = progress_int
 				self._reportPrintProgressToPlugins(progress_int)
 
-		return dict(completion=progress * 100 if progress is not None else None,
-		            filepos=filepos,
-		            printTime=int(printTime) if printTime is not None else None,
-		            printTimeLeft=int(printTimeLeft) if printTimeLeft is not None else None,
-		            printTimeLeftOrigin=printTimeLeftOrigin)
+			if progress == 0:
+				printTimeLeft = None
+				printTimeLeftOrigin = None
+			elif progress == 1.0:
+				printTimeLeft = 0
+				printTimeLeftOrigin = None
+			elif estimator is not None:
+				statisticalTotalPrintTime = None
+				statisticalTotalPrintTimeType = None
+				with self._selectedFileMutex:
+					if self._selectedFile and "estimatedPrintTime" in self._selectedFile \
+							and self._selectedFile["estimatedPrintTime"]:
+						statisticalTotalPrintTime = self._selectedFile["estimatedPrintTime"]
+						statisticalTotalPrintTimeType = self._selectedFile.get("estimatedPrintTimeType", None)
 
-	def _estimatePrintTimeLeft(self, progress, printTime, cleanedPrintTime, statisticalTotalPrintTime, statisticalTotalPrintTimeType):
-		"""
-		Tries to estimate the print time left for the print job
+				try:
+					printTimeLeft, printTimeLeftOrigin = estimator.estimate(progress,
+					                                                        printTime,
+					                                                        cleanedPrintTime,
+					                                                        statisticalTotalPrintTime,
+					                                                        statisticalTotalPrintTimeType)
+				except Exception:
+					self._logger.exception("Error while estimating print time via {}".format(estimator))
 
-		This is somewhat horrible since accurate print time estimation is pretty much impossible to
-		achieve, considering that we basically have only two data points (current progress in file and
-		time needed for that so far - former prints or a file analysis might not have happened or simply
-		be completely impossible e.g. if the file is stored on the printer's SD card) and
-		hence can only do a linear estimation of a completely non-linear process. That's a recipe
-		for inaccurate predictions right there. Yay.
+		return self._dict(completion=progress * 100 if progress is not None else None,
+		                  filepos=filepos,
+		                  printTime=int(printTime) if printTime is not None else None,
+		                  printTimeLeft=int(printTimeLeft) if printTimeLeft is not None else None,
+		                  printTimeLeftOrigin=printTimeLeftOrigin)
 
-		Anyhow, here's how this implementation works. This method gets the current progress in the
-		printed file (percentage based on bytes read vs total bytes), the print time that elapsed,
-		the same print time with the heat up times subtracted (if possible) and if available also
-		some statistical total print time (former prints or a result from the GCODE analysis).
-
-		  1. First get an "intelligent" estimate based on the :class:`~octoprint.printer.estimation.TimeEstimationHelper`.
-		     That thing tries to detect if the estimation based on our progress and time needed for that becomes
-		     stable over time through a rolling window and only returns a result once that appears to be the
-		     case.
-		  2. If we have any statistical data (former prints or a result from the GCODE analysis)
-		     but no intelligent estimate yet, we'll use that for the next step. Otherwise, up to a certain percentage
-		     in the print we do a percentage based weighing of the statistical data and the intelligent
-		     estimate - the closer to the beginning of the print, the more precedence for the statistical
-		     data, the closer to the cut off point, the more precendence for the intelligent estimate. This
-		     is our preliminary total print time.
-		  3. If the total print time is set, we do a sanity check for it. Based on the total print time
-		     estimate and the time we already spent printing, we calculate at what percentage we SHOULD be
-		     and compare that to the percentage at which we actually ARE. If it's too far off, our total
-		     can't be trusted and we fall back on the dumb estimate. Same if the time we spent printing is
-		     already higher than our total estimate.
-		  4. If we do NOT have a total print time estimate yet but we've been printing for longer than
-		     a configured amount of minutes or are further in the file than a configured percentage, we
-		     also use the dumb estimate for now.
-
-		Yes, all this still produces horribly inaccurate results. But we have to do this live during the print and
-		hence can't produce to much computational overhead, we do not have any insight into the firmware implementation
-		with regards to planner setup and acceleration settings, we might not even have access to the printed file's
-		contents and such we need to find something that works "mostly" all of the time without costing too many
-		resources. Feel free to propose a better solution within the above limitations (and I mean that, this solution
-		here makes me unhappy).
-
-		Args:
-		    progress (float or None): Current percentage in the printed file
-		    printTime (float or None): Print time elapsed so far
-		    cleanedPrintTime (float or None): Print time elapsed minus the time needed for getting up to temperature
-		        (if detectable).
-		    statisticalTotalPrintTime (float or None): Total print time of past prints against same printer profile,
-		        or estimated total print time from GCODE analysis.
-		    statisticalTotalPrintTimeType (str or None): Type of statistical print time, either "average" (total time
-		        of former prints) or "analysis"
-
-		Returns:
-		    (2-tuple) estimated print time left or None if not proper estimate could be made at all, origin of estimation
-		"""
-
-		if progress is None or progress == 0 or printTime is None or cleanedPrintTime is None:
-			return None, None
-
-		dumbTotalPrintTime = printTime / progress
-		estimatedTotalPrintTime = self._estimateTotalPrintTime(progress, cleanedPrintTime)
-		totalPrintTime = estimatedTotalPrintTime
-
-		printTimeLeftOrigin = "estimate"
-		if statisticalTotalPrintTime is not None:
-			if estimatedTotalPrintTime is None:
-				# no estimate yet, we'll use the statistical total
-				totalPrintTime = statisticalTotalPrintTime
-				printTimeLeftOrigin = statisticalTotalPrintTimeType
-
-			else:
-				if progress < self._timeEstimationStatsWeighingUntil:
-					# still inside weighing range, use part stats, part current estimate
-					sub_progress = progress * (1 / self._timeEstimationStatsWeighingUntil)
-					if sub_progress > 1.0:
-						sub_progress = 1.0
-					printTimeLeftOrigin = "mixed-" + statisticalTotalPrintTimeType
-				else:
-					# use only the current estimate
-					sub_progress = 1.0
-					printTimeLeftOrigin = "estimate"
-
-				# combine
-				totalPrintTime = (1.0 - sub_progress) * statisticalTotalPrintTime \
-				                 + sub_progress * estimatedTotalPrintTime
-
-		printTimeLeft = None
-		if totalPrintTime is not None:
-			# sanity check current total print time estimate
-			assumed_progress = cleanedPrintTime / totalPrintTime
-			min_progress = progress - self._timeEstimationValidityRange
-			max_progress = progress + self._timeEstimationValidityRange
-
-			if min_progress <= assumed_progress <= max_progress and totalPrintTime > cleanedPrintTime:
-				# appears sane, we'll use it
-				printTimeLeft = totalPrintTime - cleanedPrintTime
-
-			else:
-				# too far from the actual progress or negative,
-				# we use the dumb print time instead
-				printTimeLeft = dumbTotalPrintTime - cleanedPrintTime
-				printTimeLeftOrigin = "linear"
-
-		else:
-			printTimeLeftOrigin = "linear"
-			if progress > self._timeEstimationForceDumbFromPercent or \
-					cleanedPrintTime >= self._timeEstimationForceDumbAfterMin * 60:
-				# more than x% or y min printed and still no real estimate, ok, we'll use the dumb variant :/
-				printTimeLeft = dumbTotalPrintTime - cleanedPrintTime
-
-		if printTimeLeft is not None and printTimeLeft < 0:
-			# shouldn't actually happen, but let's make sure
-			printTimeLeft = None
-
-		return printTimeLeft, printTimeLeftOrigin
-
-	def _addTemperatureData(self, tools=None, bed=None):
+	def _addTemperatureData(self, tools=None, bed=None, chamber=None):
 		if tools is None:
 			tools = dict()
 
-		currentTimeUtc = int(time.time())
-
-		data = {
-			"time": currentTimeUtc
-		}
+		data = dict(time=int(time.time()))
 		for tool in tools.keys():
-			data["tool%d" % tool] = {
-				"actual": tools[tool][0],
-				"target": tools[tool][1]
-			}
+			data["tool%d" % tool] = self._dict(actual=tools[tool][0], target=tools[tool][1])
 		if bed is not None and isinstance(bed, tuple):
-			data["bed"] = {
-				"actual": bed[0],
-				"target": bed[1]
-			}
+			data["bed"] = self._dict(actual=bed[0], target=bed[1])
+		if chamber is not None and isinstance(chamber, tuple):
+			data["chamber"] = self._dict(actual=chamber[0], target=chamber[1])
 
 		self._temps.append(data)
 
 		self._temp = tools
 		self._bedTemp = bed
+		self._chamberTemp = chamber
 
-		self._stateMonitor.add_temperature(data)
+		self._stateMonitor.add_temperature(self._dict(**data))
 
 	def _validateJob(self, filename, sd):
 		if not valid_file_type(filename, type="machinecode"):
@@ -876,7 +921,7 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		if not os.path.isfile(path_on_disk):
 			raise InvalidFileLocation("{} does not exist in local storage, cannot select for printing".format(filename))
 
-	def _setJobData(self, filename, filesize, sd):
+	def _setJobData(self, filename, filesize, sd, user=None):
 		with self._selectedFileMutex:
 			if filename is not None:
 				if sd:
@@ -893,24 +938,22 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 					"filename": path_in_storage,
 					"filesize": filesize,
 					"sd": sd,
-					"estimatedPrintTime": None
+					"estimatedPrintTime": None,
+					"user": user
 				}
 			else:
 				self._selectedFile = None
-				self._stateMonitor.set_job_data({
-					"file": {
-						"name": None,
-						"path": None,
-						"display": None,
-						"origin": None,
-						"size": None,
-						"date": None
-					},
-					"estimatedPrintTime": None,
-					"averagePrintTime": None,
-					"lastPrintTime": None,
-					"filament": None,
-				})
+				self._stateMonitor.set_job_data(self._dict(file=self._dict(name=None,
+				                                                           path=None,
+				                                                           display=None,
+				                                                           origin=None,
+				                                                           size=None,
+				                                                           date=None),
+				                                           estimatedPrintTime=None,
+				                                           averagePrintTime=None,
+				                                           lastPrintTime=None,
+				                                           filament=None,
+				                                           user=None))
 				return
 
 			estimatedPrintTime = None
@@ -927,7 +970,8 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 
 				try:
 					fileData = self._fileManager.get_metadata(FileDestinations.SDCARD if sd else FileDestinations.LOCAL, path_on_disk)
-				except:
+				except Exception:
+					self._logger.exception("Error generating fileData")
 					fileData = None
 				if fileData is not None:
 					if "display" in fileData:
@@ -935,7 +979,7 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 					if "analysis" in fileData:
 						if estimatedPrintTime is None and "estimatedPrintTime" in fileData["analysis"]:
 							estimatedPrintTime = fileData["analysis"]["estimatedPrintTime"]
-						if "filament" in fileData["analysis"].keys():
+						if "filament" in fileData["analysis"]:
 							filament = fileData["analysis"]["filament"]
 					if "statistics" in fileData:
 						printer_profile = self._printerProfileManager.get_current_or_default()["id"]
@@ -952,20 +996,30 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 						self._selectedFile["estimatedPrintTime"] = estimatedPrintTime
 						self._selectedFile["estimatedPrintTimeType"] = "analysis"
 
-			self._stateMonitor.set_job_data({
-				"file": {
-					"name": name_in_storage,
-					"path": path_in_storage,
-					"display": display_name,
-					"origin": FileDestinations.SDCARD if sd else FileDestinations.LOCAL,
-					"size": filesize,
-					"date": date
-				},
-				"estimatedPrintTime": estimatedPrintTime,
-				"averagePrintTime": averagePrintTime,
-				"lastPrintTime": lastPrintTime,
-				"filament": filament,
-			})
+			self._stateMonitor.set_job_data(self._dict(file=self._dict(name=name_in_storage,
+			                                                           path=path_in_storage,
+			                                                           display=display_name,
+			                                                           origin=FileDestinations.SDCARD if sd else FileDestinations.LOCAL,
+			                                                           size=filesize,
+			                                                           date=date),
+			                                           estimatedPrintTime=estimatedPrintTime,
+			                                           averagePrintTime=averagePrintTime,
+			                                           lastPrintTime=lastPrintTime,
+			                                           filament=filament,
+			                                           user=user))
+
+	def _updateJobUser(self, user):
+		with self._selectedFileMutex:
+			if self._selectedFile is not None and self._selectedFile.get("user", None) != user:
+				self._selectedFile["user"] = user
+
+				job_data = self.get_current_job()
+				self._stateMonitor.set_job_data(self._dict(file=job_data["file"],
+				                                           estimatedPrintTime=job_data["estimatedPrintTime"],
+				                                           averagePrintTime=job_data["averagePrintTime"],
+				                                           lastPrintTime=job_data["lastPrintTime"],
+				                                           filament=job_data["filament"],
+				                                           user=user))
 
 	def _sendInitialStateUpdate(self, callback):
 		try:
@@ -976,19 +1030,22 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 				"messages": list(self._messages)
 			})
 			callback.on_printer_send_initial_data(data)
-		except:
-			self._logger.exception("Error while trying to send initial state update")
+		except Exception:
+			self._logger.exception(u"Error while pushing initial state update to callback {}".format(callback),
+			                       extra=dict(callback=fqcn(callback)))
 
 	def _getStateFlags(self):
-		return {
-			"operational": self.is_operational(),
-			"printing": self.is_printing(),
-			"closedOrError": self.is_closed_or_error(),
-			"error": self.is_error(),
-			"paused": self.is_paused(),
-			"ready": self.is_ready(),
-			"sdReady": self.is_sd_ready()
-		}
+		return self._dict(operational=self.is_operational(),
+		                  printing=self.is_printing(),
+		                  cancelling=self.is_cancelling(),
+		                  pausing=self.is_pausing(),
+		                  resuming=self.is_resuming(),
+		                  finishing=self.is_finishing(),
+		                  closedOrError=self.is_closed_or_error(),
+		                  error=self.is_error(),
+		                  paused=self.is_paused(),
+		                  ready=self.is_ready(),
+		                  sdReady=self.is_sd_ready())
 
 	#~~ comm.MachineComPrintCallback implementation
 
@@ -998,8 +1055,8 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		"""
 		self._addLog(to_unicode(message, "utf-8", errors="replace"))
 
-	def on_comm_temperature_update(self, temp, bedTemp):
-		self._addTemperatureData(tools=copy.deepcopy(temp), bed=copy.deepcopy(bedTemp))
+	def on_comm_temperature_update(self, temp, bedTemp, chamberTemp):
+		self._addTemperatureData(tools=copy.deepcopy(temp), bed=copy.deepcopy(bedTemp), chamber=copy.deepcopy(chamberTemp))
 
 	def on_comm_position_update(self, position, reason=None):
 		payload = dict(reason=reason)
@@ -1016,25 +1073,34 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		if self._comm is not None:
 			state_string = self._comm.getStateString()
 
-		# forward relevant state changes to gcode manager
-		if oldState == comm.MachineCom.STATE_PRINTING:
-			with self._selectedFileMutex:
-				if self._selectedFile is not None:
-					if state == comm.MachineCom.STATE_CLOSED or state == comm.MachineCom.STATE_ERROR or state == comm.MachineCom.STATE_CLOSED_WITH_ERROR:
-						def log_print():
-							self._fileManager.log_print(FileDestinations.SDCARD if self._selectedFile["sd"] else FileDestinations.LOCAL,
-							                            self._selectedFile["filename"],
-							                            time.time(),
-							                            self._comm.getPrintTime(),
-							                            False,
-							                            self._printerProfileManager.get_current_or_default()["id"])
+		if oldState in (comm.MachineCom.STATE_PRINTING,):
+			# if we were still printing and went into an error state, mark the print as failed
+			if state in (comm.MachineCom.STATE_CLOSED, comm.MachineCom.STATE_ERROR, comm.MachineCom.STATE_CLOSED_WITH_ERROR):
+				with self._selectedFileMutex:
+					if self._selectedFile is not None:
+							payload = self._payload_for_print_job_event()
+							if payload:
+								payload["time"] = self._comm.getPrintTime()
+								payload["reason"] = "error"
+								payload["error"] = self._comm.getErrorString()
 
-						thread = threading.Thread(target=log_print)
-						thread.daemon = True
-						thread.start()
+								def finalize():
+									self._fileManager.log_print(payload["origin"],
+									                            payload["path"],
+									                            time.time(),
+									                            payload["time"],
+									                            False,
+									                            self._printerProfileManager.get_current_or_default()["id"])
+									eventManager().fire(Events.PRINT_FAILED, payload)
+
+								thread = threading.Thread(target=finalize)
+								thread.daemon = True
+								thread.start()
 			self._analysisQueue.resume() # printing done, put those cpu cycles to good use
+
 		elif state == comm.MachineCom.STATE_PRINTING:
-			self._analysisQueue.pause() # do not analyse files while printing
+			if settings().get(["gcodeAnalysis", "runAt"]) == "idle":
+				self._analysisQueue.pause() # only analyse files while idle
 
 		if state == comm.MachineCom.STATE_CLOSED or state == comm.MachineCom.STATE_CLOSED_WITH_ERROR:
 			if self._comm is not None:
@@ -1078,36 +1144,55 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		self._setCurrentZ(newZ)
 
 	def on_comm_sd_state_change(self, sdReady):
-		self._stateMonitor.set_state({"text": self.get_state_string(), "flags": self._getStateFlags()})
+		self._stateMonitor.set_state(self._dict(text=self.get_state_string(), flags=self._getStateFlags()))
 
 	def on_comm_sd_files(self, files):
-		eventManager().fire(Events.UPDATED_FILES, {"type": "gcode"})
+		eventManager().fire(Events.UPDATED_FILES, {"type": "printables"})
 		self._sdFilelistAvailable.set()
 
-	def on_comm_file_selected(self, full_path, size, sd):
+	def on_comm_file_selected(self, full_path, size, sd, user=None):
 		if full_path is not None:
 			payload = self._payload_for_print_job_event(location=FileDestinations.SDCARD if sd else FileDestinations.LOCAL,
-			                                            print_job_file=full_path)
+			                                            print_job_file=full_path,
+			                                            print_job_user=user,
+			                                            action_user=user)
 			eventManager().fire(Events.FILE_SELECTED, payload)
+			self._logger_job.info("Print job selected - origin: {}, path: {}, owner: {}, user: {}".format(payload.get("origin"),
+			                                                                                              payload.get("path"),
+			                                                                                              payload.get("owner"),
+			                                                                                              payload.get("user")))
 		else:
 			eventManager().fire(Events.FILE_DESELECTED)
+			self._logger_job.info("Print job deselected - user: {}".format(user if user else "n/a"))
 
-		self._setJobData(full_path, size, sd)
-		self._stateMonitor.set_state({"text": self.get_state_string(), "flags": self._getStateFlags()})
+		self._setJobData(full_path, size, sd, user=user)
+		self._stateMonitor.set_state(self._dict(text=self.get_state_string(), flags=self._getStateFlags()))
+
+		self._create_estimator()
 
 		if self._printAfterSelect:
 			self._printAfterSelect = False
-			self.start_print(pos=self._posAfterSelect)
+			self.start_print(pos=self._posAfterSelect, user=user)
 
-	def on_comm_print_job_started(self):
-		payload = self._payload_for_print_job_event()
+	def on_comm_print_job_started(self, suppress_script=False, user=None):
+		self._updateJobUser(user) # the final job owner should always be whoever _started_ the job
+		self._stateMonitor.trigger_progress_update()
+		payload = self._payload_for_print_job_event(print_job_user=user,
+		                                            action_user=user)
 		if payload:
 			eventManager().fire(Events.PRINT_STARTED, payload)
-			self.script("beforePrintStarted",
-			            context=dict(event=payload),
-			            must_be_set=False)
+			self._logger_job.info("Print job started - origin: {}, path: {}, owner: {}, user: {}".format(payload.get("origin"),
+			                                                                                             payload.get("path"),
+			                                                                                             payload.get("owner"),
+			                                                                                             payload.get("user")))
 
-	def on_comm_print_job_done(self):
+			if not suppress_script:
+				self.script("beforePrintStarted",
+				            context=dict(event=payload),
+				            part_of_job=True,
+				            must_be_set=False)
+
+	def on_comm_print_job_done(self, suppress_script=False):
 		self._fileManager.delete_recovery_data()
 
 		payload = self._payload_for_print_job_event()
@@ -1117,12 +1202,18 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			                         filepos=payload["size"],
 			                         printTime=payload["time"],
 			                         printTimeLeft=0)
-			self._stateMonitor.set_state({"text": self.get_state_string(), "flags": self._getStateFlags()})
+			self._stateMonitor.set_state(self._dict(text=self.get_state_string(), flags=self._getStateFlags()))
 
 			eventManager().fire(Events.PRINT_DONE, payload)
-			self.script("afterPrintDone",
-			            context=dict(event=payload),
-			            must_be_set=False)
+			self._logger_job.info("Print job done - origin: {}, path: {}, owner: {}".format(payload.get("origin"),
+			                                                                                payload.get("path"),
+			                                                                                payload.get("owner")))
+
+			if not suppress_script:
+				self.script("afterPrintDone",
+				            context=dict(event=payload),
+				            part_of_job=True,
+				            must_be_set=False)
 
 			def log_print():
 				self._fileManager.log_print(payload["origin"],
@@ -1138,25 +1229,38 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 
 		else:
 			self._updateProgressData()
-			self._stateMonitor.set_state({"text": self.get_state_string(), "flags": self._getStateFlags()})
+			self._stateMonitor.set_state(self._dict(text=self.get_state_string(), flags=self._getStateFlags()))
 
 
-	def on_comm_print_job_failed(self):
-		payload = self._payload_for_print_job_event()
-		eventManager().fire(Events.PRINT_FAILED, payload)
+	def on_comm_print_job_cancelling(self, firmware_error=None, user=None):
+		payload = self._payload_for_print_job_event(action_user=user)
+		if payload:
+			if firmware_error:
+				payload["firmwareError"] = firmware_error
+			eventManager().fire(Events.PRINT_CANCELLING, payload)
 
-	def on_comm_print_job_cancelled(self):
+	def on_comm_print_job_cancelled(self, suppress_script=False, user=None):
 		self._setCurrentZ(None)
 		self._updateProgressData()
 
-		payload = self._payload_for_print_job_event(position=self._comm.cancel_position.as_dict() if self._comm and self._comm.cancel_position else None)
+		payload = self._payload_for_print_job_event(position=self._comm.cancel_position.as_dict() if self._comm and self._comm.cancel_position else None,
+		                                            action_user=user)
 		if payload:
 			payload["time"] = self._comm.getPrintTime()
 
 			eventManager().fire(Events.PRINT_CANCELLED, payload)
-			self.script("afterPrintCancelled",
-			            context=dict(event=payload),
-			            must_be_set=False)
+			self._logger_job.info("Print job cancelled - origin: {}, path: {}, owner: {}, user: {}".format(payload.get("origin"),
+			                                                                                               payload.get("path"),
+			                                                                                               payload.get("owner"),
+			                                                                                               payload.get("user")))
+
+			if not suppress_script:
+				self.script("afterPrintCancelled",
+				            context=dict(event=payload),
+				            part_of_job=True,
+				            must_be_set=False)
+
+			payload["reason"] = "cancelled"
 
 			def finalize():
 				self._fileManager.log_print(payload["origin"],
@@ -1171,48 +1275,69 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			thread.daemon = True
 			thread.start()
 
-	def on_comm_print_job_paused(self):
-		payload = self._payload_for_print_job_event(position=self._comm.pause_position.as_dict() if self._comm and self._comm.pause_position else None)
+	def on_comm_print_job_paused(self, suppress_script=False, user=None):
+		payload = self._payload_for_print_job_event(position=self._comm.pause_position.as_dict() if self._comm and self._comm.pause_position and not suppress_script else None,
+		                                            action_user=user)
 		if payload:
 			eventManager().fire(Events.PRINT_PAUSED, payload)
-			self.script("afterPrintPaused",
-			            context=dict(event=payload),
-			            must_be_set=False)
+			self._logger_job.info("Print job paused - origin: {}, path: {}, owner: {}, user: {}".format(payload.get("origin"),
+			                                                                                            payload.get("path"),
+			                                                                                            payload.get("owner"),
+			                                                                                            payload.get("user")))
+			if not suppress_script:
+				self.script("afterPrintPaused",
+				            context=dict(event=payload),
+				            part_of_job=True,
+				            must_be_set=False)
 
-	def on_comm_print_job_resumed(self):
-		payload = self._payload_for_print_job_event()
+	def on_comm_print_job_resumed(self, suppress_script=False, user=None):
+		payload = self._payload_for_print_job_event(action_user=user)
 		if payload:
 			eventManager().fire(Events.PRINT_RESUMED, payload)
-			self.script("beforePrintResumed",
-			            context=dict(event=payload),
-			            must_be_set=False)
+			self._logger_job.info("Print job resumed - origin: {}, path: {}, owner: {}, user: {}".format(payload.get("origin"),
+			                                                                                             payload.get("path"),
+			                                                                                             payload.get("owner"),
+			                                                                                             payload.get("user")))
 
-	def on_comm_file_transfer_started(self, filename, filesize):
+			if not suppress_script:
+				self.script("beforePrintResumed",
+				            context=dict(event=payload),
+				            part_of_job=True,
+				            must_be_set=False)
+
+	def on_comm_file_transfer_started(self, local_filename, remote_filename, filesize, user=None):
+		eventManager().fire(Events.TRANSFER_STARTED, dict(local=local_filename,
+		                                                  remote=remote_filename))
+
 		self._sdStreaming = True
 
-		self._setJobData(filename, filesize, True)
+		self._setJobData(remote_filename, filesize, True, user=user)
 		self._updateProgressData(completion=0.0, filepos=0, printTime=0)
-		self._stateMonitor.set_state({"text": self.get_state_string(), "flags": self._getStateFlags()})
+		self._stateMonitor.set_state(self._dict(text=self.get_state_string(), flags=self._getStateFlags()))
 
-	def on_comm_file_transfer_done(self, filename, failed=False):
+	def on_comm_file_transfer_done(self, local_filename, remote_filename, elapsed, failed=False):
 		self._sdStreaming = False
 
-		# in case of SD files, both filename and absolutePath are the same, so we set the (remote) filename for
-		# both parameters
+		payload = dict(local=local_filename,
+		               remote=remote_filename,
+		               time=elapsed)
+
 		if failed:
-			if self._streamingFailedCallback is not None:
-				self._streamingFailedCallback(filename, filename, FileDestinations.SDCARD)
+			eventManager().fire(Events.TRANSFER_FAILED, payload)
+			if callable(self._streamingFailedCallback):
+				self._streamingFailedCallback(remote_filename, remote_filename, FileDestinations.SDCARD)
 		else:
-			if self._streamingFinishedCallback is not None:
-				self._streamingFinishedCallback(filename, filename, FileDestinations.SDCARD)
+			eventManager().fire(Events.TRANSFER_DONE, payload)
+			if callable(self._streamingFinishedCallback):
+				self._streamingFinishedCallback(remote_filename, remote_filename, FileDestinations.SDCARD)
 
 		self._setCurrentZ(None)
 		self._setJobData(None, None, None)
 		self._updateProgressData()
-		self._stateMonitor.set_state({"text": self.get_state_string(), "flags": self._getStateFlags()})
+		self._stateMonitor.set_state(self._dict(text=self.get_state_string(), flags=self._getStateFlags()))
 
-	def on_comm_file_transfer_failed(self, filename):
-		self.on_comm_file_transfer_done(filename, failed=True)
+	def on_comm_file_transfer_failed(self, local_filename, remote_filename, elapsed):
+		self.on_comm_file_transfer_done(local_filename, remote_filename, elapsed, failed=True)
 
 	def on_comm_force_disconnect(self):
 		self.disconnect()
@@ -1222,10 +1347,11 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 			self._fileManager.save_recovery_data(origin, name, pos)
 		except NoSuchStorage:
 			pass
-		except:
+		except Exception:
 			self._logger.exception("Error while trying to persist print recovery data")
 
-	def _payload_for_print_job_event(self, location=None, print_job_file=None, print_job_size=None, position=None):
+	def _payload_for_print_job_event(self, location=None, print_job_file=None, print_job_size=None, print_job_user=None,
+	                                 position=None, action_user=None):
 		if print_job_file is None:
 			with self._selectedFileMutex:
 				selected_file = self._selectedFile
@@ -1234,6 +1360,7 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 
 				print_job_file = selected_file.get("filename", None)
 				print_job_size = selected_file.get("filesize", None)
+				print_job_user = selected_file.get("user", None)
 				location = FileDestinations.SDCARD if selected_file.get("sd", False) else FileDestinations.LOCAL
 
 		if not print_job_file or not location:
@@ -1255,14 +1382,16 @@ class Printer(PrinterInterface, comm.MachineComPrintCallback):
 		result= dict(name=name,
 		             path=path,
 		             origin=origin,
-		             size=print_job_size,
-
-		             # TODO deprecated, remove in 1.4.0
-		             file=full_path,
-		             filename=name)
+		             size=print_job_size)
 
 		if position is not None:
 			result["position"] = position
+
+		if print_job_user is not None:
+			result["owner"] = print_job_user
+
+		if action_user is not None:
+			result["user"] = action_user
 
 		return result
 
@@ -1288,7 +1417,7 @@ class StateMonitor(object):
 		self._state_lock = threading.Lock()
 		self._progress_lock = threading.Lock()
 
-		self._last_update = time.time()
+		self._last_update = monotonic_time()
 		self._worker = threading.Thread(target=self._work)
 		self._worker.daemon = True
 		self._worker.start()
@@ -1348,20 +1477,23 @@ class StateMonitor(object):
 		self._change_event.set()
 
 	def _work(self):
-		while True:
-			self._change_event.wait()
+		try:
+			while True:
+				self._change_event.wait()
 
-			now = time.time()
-			delta = now - self._last_update
-			additional_wait_time = self._interval - delta
-			if additional_wait_time > 0:
-				time.sleep(additional_wait_time)
+				now = monotonic_time()
+				delta = now - self._last_update
+				additional_wait_time = self._interval - delta
+				if additional_wait_time > 0:
+					time.sleep(additional_wait_time)
 
-			with self._state_lock:
-				data = self.get_current_data()
-				self._update_callback(data)
-				self._last_update = time.time()
-				self._change_event.clear()
+				with self._state_lock:
+					data = self.get_current_data()
+					self._update_callback(data)
+					self._last_update = monotonic_time()
+					self._change_event.clear()
+		except Exception:
+			logging.getLogger(__name__).exception("Looks like something crashed inside the state update worker. Please report this on the OctoPrint issue tracker (make sure to include logs!)")
 
 	def get_current_data(self):
 		with self._progress_lock:

@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import unittest
 import mock
@@ -13,17 +15,22 @@ class TestCommErrorHandling(unittest.TestCase):
 
 		# mocks
 		self._comm._handle_errors = lambda *args, **kwargs: octoprint.util.comm.MachineCom._handle_errors(self._comm, *args, **kwargs)
+		self._comm._trigger_error = lambda *args, **kwargs: octoprint.util.comm.MachineCom._trigger_error(self._comm, *args, **kwargs)
 		self._comm._recoverable_communication_errors = octoprint.util.comm.MachineCom._recoverable_communication_errors
 		self._comm._resend_request_communication_errors = octoprint.util.comm.MachineCom._resend_request_communication_errors
 		self._comm._sd_card_errors = octoprint.util.comm.MachineCom._sd_card_errors
 		self._comm._lastCommError = None
 		self._comm._errorValue = None
 		self._comm._clear_to_send = mock.Mock()
+		self._comm._error_message_hooks = dict()
+		self._comm._trigger_emergency_stop = mock.Mock()
 
 		# settings
 		self._comm._ignore_errors = False
 		self._comm._disconnect_on_errors = True
+		self._comm._send_m112_on_error = True
 		self._comm.isPrinting.return_value = True
+		self._comm.isSdPrinting.return_value = False
 		self._comm.isError.return_value = False
 
 	@ddt.data(
@@ -113,9 +120,37 @@ class TestCommErrorHandling(unittest.TestCase):
 		self.assertEqual(line, result)
 		self.assert_nop()
 
+	@ddt.data("Error: This should get handled", "!! This should also get handled")
+	def test_unknown_handled(self, line):
+		"""Should pass"""
+		def handler(comm, message, *args, **kwargs):
+			return "handled" in message
+		self._comm._error_message_hooks["test"] = handler
+		result = self._comm._handle_errors(line)
+		self.assertEqual(line, result)
+		self.assert_nop()
+
 	@ddt.data("Error: Printer on fire")
 	def test_other_error_disconnect(self, line):
 		"""Should trigger escalation"""
+		result = self._comm._handle_errors(line)
+		self.assertEqual(line, result)
+
+		# what should have happened
+		self.assert_m112_sent()
+		self.assert_disconnected()
+
+		# what should not have happened
+		self.assert_not_handle_ok()
+		self.assert_not_last_comm_error()
+		self.assert_not_print_cancelled()
+		self.assert_not_cleared_to_send()
+
+	@ddt.data("Error: Printer on fire")
+	def test_other_error_no_m112(self, line):
+		"""Should trigger escalation"""
+		self._comm._send_m112_on_error = False
+
 		result = self._comm._handle_errors(line)
 		self.assertEqual(line, result)
 
@@ -127,6 +162,7 @@ class TestCommErrorHandling(unittest.TestCase):
 		self.assert_not_last_comm_error()
 		self.assert_not_print_cancelled()
 		self.assert_not_cleared_to_send()
+		self.assert_not_m112_sent()
 
 	@ddt.data("Error: Printer on fire")
 	def test_other_error_cancel(self, line):
@@ -143,6 +179,7 @@ class TestCommErrorHandling(unittest.TestCase):
 		# what should not have happened
 		self.assert_not_handle_ok()
 		self.assert_not_last_comm_error()
+		self.assert_not_m112_sent()
 		self.assert_not_disconnected()
 
 	@ddt.data("Error: Printer on fire")
@@ -160,6 +197,8 @@ class TestCommErrorHandling(unittest.TestCase):
 		self.assert_not_handle_ok()
 		self.assert_not_last_comm_error()
 		self.assert_not_print_cancelled()
+		self.assert_not_m112_sent()
+		self.assert_not_disconnected()
 
 	def test_not_an_error(self):
 		"""Should pass"""
@@ -193,13 +232,21 @@ class TestCommErrorHandling(unittest.TestCase):
 	def assert_not_last_comm_error(self):
 		self.assertIsNone(self._comm._lastCommError)
 
+	def assert_m112_sent(self):
+		self._comm._trigger_emergency_stop.assert_called_once_with(close=False)
+
+	def assert_not_m112_sent(self):
+		self._comm._trigger_emergency_stop.assert_not_called()
+
 	def assert_disconnected(self):
 		self.assertIsNotNone(self._comm._errorValue)
-		self._comm._changeState.assert_called_once()
+		self._comm._changeState.assert_called_with(self._comm.STATE_ERROR)
+		self._comm.close.assert_called_once_with(is_error=True)
 
 	def assert_not_disconnected(self):
 		self.assertIsNone(self._comm._errorValue)
 		self._comm._changeState.assert_not_called()
+		self._comm.close.assert_not_called()
 
 	def assert_print_cancelled(self):
 		self._comm.cancelPrint.assert_called_once()

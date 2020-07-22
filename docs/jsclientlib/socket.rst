@@ -42,7 +42,7 @@
    To register for all message types, provide ``*`` as the type to register for.
 
    ``handler`` is expected to be a function accepting one object parameter ``eventObj``, consisting
-   of the received message as property ``key`` and the received payload (if any) as property ``data``.
+   of the received message as property ``event`` and the received payload (if any) as property ``data``.
 
    .. code-block:: javascript
 
@@ -85,7 +85,7 @@
 .. js:function:: OctoPrintClient.socket.onRateTooHigh(measured, maximum)
 
    Called by the socket client when the last measured round trip time was higher than the
-   current upper procesisng limit, indicating that the messages are now processed slower than
+   current upper processing limit, indicating that the messages are now processed slower than
    the current rate requires and a slower rate might be necessary.
 
    Can be overwritten with custom handler methods. The default implementation will call

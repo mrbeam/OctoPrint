@@ -14,6 +14,7 @@ $(function() {
                 custom_box: false
             },
             heatedBed: true,
+            heatedChamber: false,
             axes: {
                 x: {speed: 6000, inverted: false},
                 y: {speed: 6000, inverted: false},
@@ -60,6 +61,7 @@ $(function() {
         });
 
         self.heatedBed = ko.observable();
+        self.heatedChamber = ko.observable();
 
         self.nozzleDiameter = ko.observable();
         self.extruders = ko.observable();
@@ -209,6 +211,7 @@ $(function() {
             }
 
             self.heatedBed(data.heatedBed);
+            self.heatedChamber(data.heatedChamber);
 
             self.nozzleDiameter(data.extruder.nozzleDiameter);
             self.sharedNozzle(data.extruder.sharedNozzle);
@@ -269,6 +272,7 @@ $(function() {
                     origin: self.volumeOrigin()
                 },
                 heatedBed: self.heatedBed(),
+                heatedChamber: self.heatedChamber(),
                 extruder: {
                     count: parseInt(self.extruders()),
                     offsets: [
@@ -396,8 +400,11 @@ $(function() {
         self.fromProfileData(cleanProfile());
     }
 
-    function PrinterProfilesViewModel() {
+    function PrinterProfilesViewModel(parameters) {
         var self = this;
+
+        self.loginState = parameters[0];
+        self.access = parameters[1];
 
         self.requestInProgress = ko.observable(false);
 
@@ -453,6 +460,10 @@ $(function() {
         };
 
         self.requestData = function() {
+            if (!self.loginState.hasPermission(self.access.permissions.CONNECTION)) {
+                return;
+            }
+
             return OctoPrint.printerprofiles.list()
                 .done(self.fromResponse);
         };
@@ -529,7 +540,7 @@ $(function() {
                     });
             };
 
-            showConfirmationDialog(_.sprintf(gettext("You are about to delete the printer profile \"%(name)s\"."), {name: data.name}),
+            showConfirmationDialog(_.sprintf(gettext("You are about to delete the printer profile \"%(name)s\"."), {name: _.escape(data.name)}),
                                    perform);
         };
 
@@ -564,7 +575,7 @@ $(function() {
             var dialogTitle = $("h3.modal-title", editDialog);
 
             var add = data === undefined;
-            dialogTitle.text(add ? gettext("Add Printer Profile") : _.sprintf(gettext("Edit Printer Profile \"%(name)s\""), {name: data.name}));
+            dialogTitle.text(add ? gettext("Add Printer Profile") : _.sprintf(gettext("Edit Printer Profile \"%(name)s\""), {name: _.escape(data.name)}));
             confirmButton.unbind("click");
             confirmButton.bind("click", function() {
                 if (self.enableEditorSubmitButton()) {
@@ -594,10 +605,14 @@ $(function() {
         };
 
         self.onSettingsShown = self.requestData;
-        self.onStartup = self.requestData;
+
+        self.onUserPermissionsChanged = self.onUserLoggedIn = self.onUserLoggedOut = function() {
+            self.requestData();
+        }
     }
 
     OCTOPRINT_VIEWMODELS.push({
-        construct: PrinterProfilesViewModel
+        construct: PrinterProfilesViewModel,
+        dependencies: ["loginStateViewModel", "accessViewModel"]
     });
 });

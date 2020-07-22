@@ -9,6 +9,7 @@
   * [Bootstrap Slider Knockout Binding](https://github.com/cosminstefanxp/bootstrap-slider-knockout-binding): MIT
   * [Bootstrap Slider](http://seiyria.com/bootstrap-slider/): Apache License 2.0
   * [Bootstrap Tabdrop](http://www.eyecon.ro/bootstrap-tabdrop): Apache License 2.0
+  * [css-element-queries](https://github.com/marcj/css-element-queries): MIT
   * [Detect Mobile Browser](http://detectmobilebrowsers.com/): Public Domain
   * [Flot](http://www.flotcharts.org/): MIT
   * [JavaScript MD5](https://github.com/blueimp/JavaScript-MD5): MIT
@@ -36,7 +37,6 @@
   * [Awesome-Slugify](https://pypi.python.org/pypi/awesome-slugify): GPLv3
   * [chainmap](https://bitbucket.org/jeunice/chainmap): Python
   * [Click](http://click.pocoo.org/): BSD
-  * [dateutil](https://dateutil.readthedocs.io/): BSD
   * [emoji](https://github.com/carpedm20/emoji/): BSD
   * [feedparser](https://github.com/kurtmckee/feedparser): BSD
   * [Flask](http://flask.pocoo.org/): BSD
@@ -71,7 +71,6 @@
   * [ddt](https://github.com/txels/ddt): MIT
   * [mock](https://github.com/testing-cabal/mock): BSD
   * [nose](http://pythonhosted.org/nose/): LGPL
-  * [pypandoc](https://github.com/bebraw/pypandoc): MIT
   * [Sphinx](http://sphinx-doc.org/): BSD
   * [sphinxcontrib-httpdomain](https://bitbucket.org/birkenfeld/sphinx-contrib/src/default/httpdomain/): BSD
   * [sphinxcontrib-mermad](https://github.com/mgaitan/sphinxcontrib-mermaid): BSD

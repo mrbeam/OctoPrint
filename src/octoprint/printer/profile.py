@@ -1,11 +1,153 @@
-# coding=utf-8
-from __future__ import absolute_import, division, print_function
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+"""
+This module contains printer profile related code.
+
+A printer profile is a ``dict`` of the following structure:
+
+.. list-table::
+   :widths: 15 5 30
+   :header-rows: 1
+
+   * - Name
+     - Type
+     - Description
+   * - ``id``
+     - ``string``
+     - Internal id of the printer profile
+   * - ``name``
+     - ``string``
+     - Human readable name of the printer profile
+   * - ``model``
+     - ``string``
+     - Printer model
+   * - ``color``
+     - ``string``
+     - Color to associate with the printer profile
+   * - ``volume``
+     - ``dict``
+     - Information about the print volume
+   * - ``volume.width``
+     - ``float``
+     - Width of the print volume (X axis)
+   * - ``volume.depth``
+     - ``float``
+     - Depth of the print volume (Y axis)
+   * - ``volume.height``
+     - ``float``
+     - Height of the print volume (Z axis)
+   * - ``volume.formFactor``
+     - ``string``
+     - Form factor of the print bed, either ``rectangular`` or ``circular``
+   * - ``volume.origin``
+     - ``string``
+     - Location of gcode origin in the print volume, either ``lowerleft`` or ``center``
+   * - ``volume.custom_box``
+     - ``dict`` or ``False``
+     - Custom boundary box overriding the default bounding box based on the provided width, depth, height and origin.
+       If ``False``, the default boundary box will be used.
+   * - ``volume.custom_box.x_min``
+     - ``float``
+     - Minimum valid X coordinate
+   * - ``volume.custom_box.y_min``
+     - ``float``
+     - Minimum valid Y coordinate
+   * - ``volume.custom_box.z_min``
+     - ``float``
+     - Minimum valid Z coordinate
+   * - ``volume.custom_box.x_max``
+     - ``float``
+     - Maximum valid X coordinate
+   * - ``volume.custom_box.y_max``
+     - ``float``
+     - Maximum valid Y coordinate
+   * - ``volume.custom_box.z_max``
+     - ``float``
+     - Maximum valid Z coordinate
+   * - ``heatedBed``
+     - ``bool``
+     - Whether the printer has a heated bed (``True``) or not (``False``)
+   * - ``heatedChamber``
+     - ``bool``
+     - Whether the printer has a heated chamber (``True``) or not (``False``)
+   * - ``extruder``
+     - ``dict``
+     - Information about the printer's extruders
+   * - ``extruder.count``
+     - ``int``
+     - How many extruders the printer has (default 1)
+   * - ``extruder.offsets``
+     - ``list`` of ``tuple``
+     - Extruder offsets relative to first extruder, list of (x, y) tuples, first is always (0,0)
+   * - ``extruder.nozzleDiameter``
+     - ``float``
+     - Diameter of the printer nozzle(s)
+   * - ``extruder.sharedNozzle``
+     - ``boolean``
+     - Whether there's only one nozzle shared among all extruders (true) or one nozzle per extruder (false).
+   * - ``axes``
+     - ``dict``
+     - Information about the printer axes
+   * - ``axes.x``
+     - ``dict``
+     - Information about the printer's X axis
+   * - ``axes.x.speed``
+     - ``float``
+     - Speed of the X axis in mm/s
+   * - ``axes.x.inverted``
+     - ``bool``
+     - Whether a positive value change moves the nozzle away from the print bed's origin (False, default) or towards it (True)
+   * - ``axes.y``
+     - ``dict``
+     - Information about the printer's Y axis
+   * - ``axes.y.speed``
+     - ``float``
+     - Speed of the Y axis in mm/s
+   * - ``axes.y.inverted``
+     - ``bool``
+     - Whether a positive value change moves the nozzle away from the print bed's origin (False, default) or towards it (True)
+   * - ``axes.z``
+     - ``dict``
+     - Information about the printer's Z axis
+   * - ``axes.z.speed``
+     - ``float``
+     - Speed of the Z axis in mm/s
+   * - ``axes.z.inverted``
+     - ``bool``
+     - Whether a positive value change moves the nozzle away from the print bed (False, default) or towards it (True)
+   * - ``axes.e``
+     - ``dict``
+     - Information about the printer's E axis
+   * - ``axes.e.speed``
+     - ``float``
+     - Speed of the E axis in mm/s
+   * - ``axes.e.inverted``
+     - ``bool``
+     - Whether a positive value change extrudes (False, default) or retracts (True) filament
+
+.. autoclass:: PrinterProfileManager
+   :members:
+
+.. autoclass:: BedFormFactor
+   :members:
+
+.. autoclass:: BedOrigin
+   :members:
+
+.. autoclass:: SaveError
+
+.. autoclass:: CouldNotOverwriteError
+
+.. autoclass:: InvalidProfileError
+"""
 
 __author__ = "Gina Häußge <osd@foosel.net>"
 __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agpl.html'
 __copyright__ = "Copyright (C) 2014 The OctoPrint Project - Released under terms of the AGPLv3 License"
 
 
+import io
 import os
 import copy
 import re
@@ -20,25 +162,41 @@ from octoprint.settings import settings
 from octoprint.util import dict_merge, dict_sanitize, dict_contains_keys, is_hidden_path
 
 class SaveError(Exception):
+	"""Saving a profile failed"""
 	pass
 
 class CouldNotOverwriteError(SaveError):
+	"""Overwriting of a profile not allowed"""
 	pass
 
 class InvalidProfileError(Exception):
+	"""Profile invalid"""
 	pass
 
-class BedTypes(object):
+class BedFormFactor(object):
+	"""Valid values for bed form factor"""
+
 	RECTANGULAR = "rectangular"
+	"""Rectangular bed"""
+
 	CIRCULAR = "circular"
+	"""Circular bed"""
 
 	@classmethod
 	def values(cls):
 		return [getattr(cls, name) for name in cls.__dict__ if not (name.startswith("__") or name == "values")]
 
+BedTypes = BedFormFactor
+"""Deprecated name of :class:`BedFormFactors`"""
+
 class BedOrigin(object):
+	"""Valid values for bed origin"""
+
 	LOWERLEFT = "lowerleft"
+	"""Origin at lower left corner of the bed when looking from the top"""
+
 	CENTER = "center"
+	"""Origin at the center of the bed when looking from top"""
 
 	@classmethod
 	def values(cls):
@@ -48,125 +206,6 @@ class PrinterProfileManager(object):
 	"""
 	Manager for printer profiles. Offers methods to select the globally used printer profile and to list, add, remove,
 	load and save printer profiles.
-
-	A printer profile is a ``dict`` of the following structure:
-
-	.. list-table::
-	   :widths: 15 5 10 30
-	   :header-rows: 1
-
-	   * - Name
-	     - Type
-	     - Description
-	   * - ``id``
-	     - ``string``
-	     - Internal id of the printer profile
-	   * - ``name``
-	     - ``string``
-	     - Human readable name of the printer profile
-	   * - ``model``
-	     - ``string``
-	     - Printer model
-	   * - ``color``
-	     - ``string``
-	     - Color to associate with the printer profile
-	   * - ``volume``
-	     - ``dict``
-	     - Information about the print volume
-	   * - ``volume.width``
-	     - ``float``
-	     - Width of the print volume (X axis)
-	   * - ``volume.depth``
-	     - ``float``
-	     - Depth of the print volume (Y axis)
-	   * - ``volume.height``
-	     - ``float``
-	     - Height of the print volume (Z axis)
-	   * - ``volume.formFactor``
-	     - ``string``
-	     - Form factor of the print bed, either ``rectangular`` or ``circular``
-	   * - ``volume.origin``
-	     - ``string``
-	     - Location of gcode origin in the print volume, either ``lowerleft`` or ``center``
-	   * - ``volume.custom_box``
-	     - ``dict`` or ``False``
-	     - Custom boundary box overriding the default bounding box based on the provided width, depth, height and origin.
-	       If ``False``, the default boundary box will be used.
-	   * - ``volume.custom_box.x_min``
-	     - ``float``
-	     - Minimum valid X coordinate
-	   * - ``volume.custom_box.y_min``
-	     - ``float``
-	     - Minimum valid Y coordinate
-	   * - ``volume.custom_box.z_min``
-	     - ``float``
-	     - Minimum valid Z coordinate
-	   * - ``volume.custom_box.x_max``
-	     - ``float``
-	     - Maximum valid X coordinate
-	   * - ``volume.custom_box.y_max``
-	     - ``float``
-	     - Maximum valid Y coordinate
-	   * - ``volume.custom_box.z_max``
-	     - ``float``
-	     - Maximum valid Z coordinate
-	   * - ``heatedBed``
-	     - ``bool``
-	     - Whether the printer has a heated bed (``True``) or not (``False``)
-	   * - ``extruder``
-	     - ``dict``
-	     - Information about the printer's extruders
-	   * - ``extruder.count``
-	     - ``int``
-	     - How many extruders the printer has (default 1)
-	   * - ``extruder.offsets``
-	     - ``list`` of ``tuple``s
-	     - Extruder offsets relative to first extruder, list of (x, y) tuples, first is always (0,0)
-	   * - ``extruder.nozzleDiameter``
-	     - ``float``
-	     - Diameter of the printer nozzle(s)
-	   * - ``extruder.sharedNozzle``
-	     - ``boolean``
-	     - Whether there's only one nozzle shared among all extruders (true) or one nozzle per extruder (false).
-	   * - ``axes``
-	     - ``dict``
-	     - Information about the printer axes
-	   * - ``axes.x``
-	     - ``dict``
-	     - Information about the printer's X axis
-	   * - ``axes.x.speed``
-	     - ``float``
-	     - Speed of the X axis in mm/s
-	   * - ``axes.x.inverted``
-	     - ``bool``
-	     - Whether a positive value change moves the nozzle away from the print bed's origin (False, default) or towards it (True)
-	   * - ``axes.y``
-	     - ``dict``
-	     - Information about the printer's Y axis
-	   * - ``axes.y.speed``
-	     - ``float``
-	     - Speed of the Y axis in mm/s
-	   * - ``axes.y.inverted``
-	     - ``bool``
-	     - Whether a positive value change moves the nozzle away from the print bed's origin (False, default) or towards it (True)
-	   * - ``axes.z``
-	     - ``dict``
-	     - Information about the printer's Z axis
-	   * - ``axes.z.speed``
-	     - ``float``
-	     - Speed of the Z axis in mm/s
-	   * - ``axes.z.inverted``
-	     - ``bool``
-	     - Whether a positive value change moves the nozzle away from the print bed (False, default) or towards it (True)
-	   * - ``axes.e``
-	     - ``dict``
-	     - Information about the printer's E axis
-	   * - ``axes.e.speed``
-	     - ``float``
-	     - Speed of the E axis in mm/s
-	   * - ``axes.e.inverted``
-	     - ``bool``
-	     - Whether a positive value change extrudes (False, default) or retracts (True) filament
 	"""
 
 	default = dict(
@@ -178,11 +217,12 @@ class PrinterProfileManager(object):
 			width = 200,
 			depth = 200,
 			height = 200,
-			formFactor = BedTypes.RECTANGULAR,
+			formFactor = BedFormFactor.RECTANGULAR,
 			origin = BedOrigin.LOWERLEFT,
 			custom_box = False
 		),
 		heatedBed = True,
+		heatedChamber = False,
 		extruder=dict(
 			count = 1,
 			offsets = [
@@ -216,7 +256,7 @@ class PrinterProfileManager(object):
 			return
 
 		if not isinstance(default_overrides, dict):
-			self._logger.warn("Existing default profile from settings is not a valid profile, refusing to migrate: {!r}".format(default_overrides))
+			self._logger.warning("Existing default profile from settings is not a valid profile, refusing to migrate: {!r}".format(default_overrides))
 			return
 
 		default_overrides["id"] = "_default"
@@ -280,14 +320,21 @@ class PrinterProfileManager(object):
 		except InvalidProfileError:
 			return None
 
-	def remove(self, identifier):
+	def remove(self, identifier, trigger_event=False):
 		if self._current is not None and self._current["id"] == identifier:
 			return False
 		elif settings().get(["printerProfiles", "default"]) == identifier:
 			return False
-		return self._remove_from_path(self._get_profile_path(identifier))
 
-	def save(self, profile, allow_overwrite=False, make_default=False):
+		removed = self._remove_from_path(self._get_profile_path(identifier))
+		if removed and trigger_event:
+			from octoprint.events import eventManager, Events
+			payload = dict(identifier=identifier)
+			eventManager().fire(Events.PRINTER_PROFILE_DELETED, payload=payload)
+
+		return removed
+
+	def save(self, profile, allow_overwrite=False, make_default=False, trigger_event=False):
 		if "id" in profile:
 			identifier = profile["id"]
 		elif "name" in profile:
@@ -302,7 +349,10 @@ class PrinterProfileManager(object):
 		profile = dict_sanitize(profile, self.__class__.default)
 		profile = dict_merge(self.__class__.default, profile)
 
-		self._save_to_path(self._get_profile_path(identifier), profile, allow_overwrite=allow_overwrite)
+		path = self._get_profile_path(identifier)
+		is_overwrite = os.path.exists(path)
+
+		self._save_to_path(path, profile, allow_overwrite=allow_overwrite)
 
 		if make_default:
 			settings().set(["printerProfiles", "default"], identifier)
@@ -310,6 +360,13 @@ class PrinterProfileManager(object):
 
 		if self._current is not None and self._current["id"] == identifier:
 			self.select(identifier)
+
+		from octoprint.events import eventManager, Events
+		if trigger_event:
+			payload = dict(identifier=identifier)
+			event = Events.PRINTER_PROFILE_MODIFIED if is_overwrite else Events.PRINTER_PROFILE_ADDED
+			eventManager().fire(event, payload=payload)
+
 		return self.get(identifier)
 
 	def is_default_unmodified(self):
@@ -333,12 +390,12 @@ class PrinterProfileManager(object):
 			if profile is not None:
 				return profile
 			else:
-				self._logger.warn("Default profile {} is invalid, falling back to built-in defaults".format(default))
+				self._logger.warning("Default profile {} is invalid, falling back to built-in defaults".format(default))
 
 		return copy.deepcopy(self.__class__.default)
 
 	def set_default(self, identifier):
-		all_identifiers = self._load_all_identifiers().keys()
+		all_identifiers = self._load_all_identifiers()
 		if identifier is not None and not identifier in all_identifiers:
 			return
 
@@ -368,7 +425,7 @@ class PrinterProfileManager(object):
 			try:
 				profile = self._load_from_path(path)
 			except InvalidProfileError:
-				self._logger.warn("Profile {} is invalid, skipping".format(identifier))
+				self._logger.warning("Profile {} is invalid, skipping".format(identifier))
 				continue
 
 			if profile is None:
@@ -395,7 +452,7 @@ class PrinterProfileManager(object):
 			return None
 
 		import yaml
-		with open(path) as f:
+		with io.open(path, 'rt', encoding='utf-8') as f:
 			profile = yaml.safe_load(f)
 
 		if profile is None or not isinstance(profile, dict):
@@ -404,13 +461,13 @@ class PrinterProfileManager(object):
 		if self._migrate_profile(profile):
 			try:
 				self._save_to_path(path, profile, allow_overwrite=True)
-			except:
+			except Exception:
 				self._logger.exception("Tried to save profile to {path} after migrating it while loading, ran into exception".format(path=path))
 
 		profile = self._ensure_valid_profile(profile)
 
 		if not profile:
-			self._logger.warn("Invalid profile: %s" % path)
+			self._logger.warning("Invalid profile: %s" % path)
 			raise InvalidProfileError()
 		return profile
 
@@ -425,8 +482,8 @@ class PrinterProfileManager(object):
 		from octoprint.util import atomic_write
 		import yaml
 		try:
-			with atomic_write(path, "wb", max_permissions=0o666) as f:
-				yaml.safe_dump(profile, f, default_flow_style=False, indent="  ", allow_unicode=True)
+			with atomic_write(path, mode='wt', max_permissions=0o666) as f:
+				yaml.safe_dump(profile, f, default_flow_style=False, indent=2, allow_unicode=True)
 		except Exception as e:
 			self._logger.exception("Error while trying to save profile %s" % profile["id"])
 			raise SaveError("Cannot save profile %s: %s" % (profile["id"], str(e)))
@@ -435,7 +492,7 @@ class PrinterProfileManager(object):
 		try:
 			os.remove(path)
 			return True
-		except:
+		except Exception:
 			return False
 
 	def _get_profile_path(self, identifier):
@@ -459,7 +516,7 @@ class PrinterProfileManager(object):
 		modified = False
 
 		if "volume" in profile and "formFactor" in profile["volume"] and not "origin" in profile["volume"]:
-			profile["volume"]["origin"] = BedOrigin.CENTER if profile["volume"]["formFactor"] == BedTypes.CIRCULAR else BedOrigin.LOWERLEFT
+			profile["volume"]["origin"] = BedOrigin.CENTER if profile["volume"]["formFactor"] == BedFormFactor.CIRCULAR else BedOrigin.LOWERLEFT
 			modified = True
 
 		if "volume" in profile and not "custom_box" in profile["volume"]:
@@ -474,12 +531,16 @@ class PrinterProfileManager(object):
 			profile["extruder"]["offsets"] = [(0.0, 0.0)]
 			modified = True
 
+		if not "heatedChamber" in profile:
+			profile["heatedChamber"] = False
+			modified = True
+
 		return modified
 
 	def _ensure_valid_profile(self, profile):
 		# ensure all keys are present
 		if not dict_contains_keys(self.default, profile):
-			self._logger.warn("Profile invalid, missing keys. Expected: {expected!r}. Actual: {actual!r}".format(expected=self.default.keys(), actual=profile.keys()))
+			self._logger.warning("Profile invalid, missing keys. Expected: {expected!r}. Actual: {actual!r}".format(expected=list(self.default.keys()), actual=list(profile.keys())))
 			return False
 
 		# conversion helper
@@ -500,7 +561,7 @@ class PrinterProfileManager(object):
 			try:
 				convert_value(profile, path, int)
 			except Exception as e:
-				self._logger.warn("Profile has invalid value for path {path!r}: {msg}".format(path=".".join(path), msg=str(e)))
+				self._logger.warning("Profile has invalid value for path {path!r}: {msg}".format(path=".".join(path), msg=str(e)))
 				return False
 
 		# convert floats
@@ -508,7 +569,7 @@ class PrinterProfileManager(object):
 			try:
 				convert_value(profile, path, float)
 			except Exception as e:
-				self._logger.warn("Profile has invalid value for path {path!r}: {msg}".format(path=".".join(path), msg=str(e)))
+				self._logger.warning("Profile has invalid value for path {path!r}: {msg}".format(path=".".join(path), msg=str(e)))
 				return False
 
 		# convert booleans
@@ -516,25 +577,25 @@ class PrinterProfileManager(object):
 			try:
 				convert_value(profile, path, bool)
 			except Exception as e:
-				self._logger.warn("Profile has invalid value for path {path!r}: {msg}".format(path=".".join(path), msg=str(e)))
+				self._logger.warning("Profile has invalid value for path {path!r}: {msg}".format(path=".".join(path), msg=str(e)))
 				return False
 
 		# validate form factor
-		if not profile["volume"]["formFactor"] in BedTypes.values():
-			self._logger.warn("Profile has invalid value volume.formFactor: {formFactor}".format(formFactor=profile["volume"]["formFactor"]))
+		if not profile["volume"]["formFactor"] in BedFormFactor.values():
+			self._logger.warning("Profile has invalid value volume.formFactor: {formFactor}".format(formFactor=profile["volume"]["formFactor"]))
 			return False
 
 		# validate origin type
 		if not profile["volume"]["origin"] in BedOrigin.values():
-			self._logger.warn("Profile has invalid value in volume.origin: {origin}".format(origin=profile["volume"]["origin"]))
+			self._logger.warning("Profile has invalid value in volume.origin: {origin}".format(origin=profile["volume"]["origin"]))
 			return False
 
 		# ensure origin and form factor combination is legal
-		if profile["volume"]["formFactor"] == BedTypes.CIRCULAR and not profile["volume"]["origin"] == BedOrigin.CENTER:
+		if profile["volume"]["formFactor"] == BedFormFactor.CIRCULAR and not profile["volume"]["origin"] == BedOrigin.CENTER:
 			profile["volume"]["origin"] = BedOrigin.CENTER
 
 		# force width and depth of volume to be identical for circular beds, with width being the reference
-		if profile["volume"]["formFactor"] == BedTypes.CIRCULAR:
+		if profile["volume"]["formFactor"] == BedFormFactor.CIRCULAR:
 			profile["volume"]["depth"] = profile["volume"]["width"]
 
 		# if we have a custom bounding box, validate it
@@ -553,8 +614,8 @@ class PrinterProfileManager(object):
 						try:
 							value = limiter(float(value), default_box[prop])
 							profile["volume"]["custom_box"][prop] = value
-						except:
-							self._logger.warn("Profile has invalid value in volume.custom_box.{}: {!r}".format(prop, value))
+						except Exception:
+							self._logger.warning("Profile has invalid value in volume.custom_box.{}: {!r}".format(prop, value))
 							return False
 
 				# make sure we actually do have a custom box and not just the same values as the
@@ -570,13 +631,13 @@ class PrinterProfileManager(object):
 		offsets = []
 		for offset in profile["extruder"]["offsets"]:
 			if not len(offset) == 2:
-				self._logger.warn("Profile has an invalid extruder.offsets entry: {entry!r}".format(entry=offset))
+				self._logger.warning("Profile has an invalid extruder.offsets entry: {entry!r}".format(entry=offset))
 				return False
 			x_offset, y_offset = offset
 			try:
 				offsets.append((float(x_offset), float(y_offset)))
-			except:
-				self._logger.warn("Profile has an extruder.offsets entry with non-float values: {entry!r}".format(entry=offset))
+			except Exception:
+				self._logger.warning("Profile has an extruder.offsets entry with non-float values: {entry!r}".format(entry=offset))
 				return False
 		profile["extruder"]["offsets"] = offsets
 

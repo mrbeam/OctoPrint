@@ -11,7 +11,7 @@ is clicked.
 
 Unless :ref:`configured otherwise <sec-configuration-config_yaml-folder>`, OctoPrint expects scripts to be located in
 the ``scripts/gcode`` folder in OctoPrint configuration directory (per default ``~/.octoprint`` on Linux, ``%APPDATA%\OctoPrint``
-on Windows and ``~/Library/Application Support/OctoPrint`` on MacOS).
+on Windows and ``~/Library/Application Support/OctoPrint`` on macOS).
 
 These GCODE scripts are backed by the templating engine Jinja2, allowing more than just
 simple "send-as-is" scripts but making use of a full blown templating language in order to create your scripts. To
@@ -66,7 +66,7 @@ Context
 
 All GCODE scripts have access to the following template variables through the template context:
 
-  * ``printer_profile``: The currently selected Printer Profile, including
+  * ``printer_profile``: The currently selected :ref:`Printer Profile <sec-modules-printer-profile>`, including
     information such as the extruder count, the build volume size, the filament diameter etc.
   * ``last_position``: Last position reported by the printer via `M114` (might be unset if no `M114` was sent so far!).
     Consists of ``x``, ``y``, ``z`` and ``e`` coordinates as received by the printer and tracked values for ``f`` and
@@ -75,11 +75,12 @@ All GCODE scripts have access to the following template variables through the te
   * ``last_temperature``: Last actual and target temperature reported for all available tools and if available the
     heated bed. This is a dictionary of key-value pairs. The keys are the indices of the available tools (``0``, ``1``,
     ...) and ``b`` for the heated bed. The values are a dictionary consisting of ``actual`` and ``target`` keys mapped
-    to the corresponding temperature in degrees celsius. Note that not all tools your printer has must necessarily be
+    to the corresponding temperature in degrees Celsius. Note that not all tools your printer has must necessarily be
     present here, neither must the heated bed - it depends on whether OctoPrint has values for a tool or the bed. Also
     note that ``actual`` and ``target`` might be ``None``.
   * ``script``: An object wrapping the script's type (``gcode``) and name (e.g. ``afterPrintCancelled``) as ``script.type``
     and ``script.name`` respectively.
+  * ``plugins``: An object containing variables provided by plugins (e.g ``plugins.myplugin.myvariable``)
 
 There are a few additional template variables available for the following specific scripts:
 
@@ -156,9 +157,13 @@ The ``disable_hotends`` snippet is defined as follows:
 .. code-block:: jinja
    :caption: Default ``disable_hotends`` snippet
 
+   {% if printer_profile.extruder.sharedNozzle %}
+   M104 T0 S0
+   {% else %}
    {% for tool in range(printer_profile.extruder.count) %}
    M104 T{{ tool }} S0
    {% endfor %}
+   {% endif %}
 
 The ``disable_bed`` snippet is defined as follows:
 

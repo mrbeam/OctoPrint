@@ -28,6 +28,8 @@ List All Slicers and Slicing Profiles
    Returns a :http:statuscode:`200` response with a :ref:`Slicer list <sec-api-slicing-datamodel-slicerlist>`
    as the body upon successful completion.
 
+   Requires the ``SLICE`` permission.
+
    **Example**
 
    .. sourcecode:: http
@@ -42,22 +44,22 @@ List All Slicers and Slicing Profiles
       Content-Type: application/json
 
       {
-        "cura": {
-          "key": "cura",
-          "displayName": "CuraEngine",
+        "curalegacy": {
+          "key": "curalegacy",
+          "displayName": "Cura Legacy",
           "default": true,
           "profiles": {
             "high_quality": {
               "key": "high_quality",
               "displayName": "High Quality",
               "default": false,
-              "resource": "http://example.com/api/slicing/cura/profiles/high_quality"
+              "resource": "http://example.com/api/slicing/curalegacy/profiles/high_quality"
             },
             "medium_quality": {
               "key": "medium_quality",
               "displayName": "Medium Quality",
               "default": true,
-              "resource": "http://example.com/api/slicing/cura/profiles/medium_quality"
+              "resource": "http://example.com/api/slicing/curalegacy/profiles/medium_quality"
             }
           }
         }
@@ -77,11 +79,13 @@ List Slicing Profiles of a Specific Slicer
    Returns a :http:statuscode:`200` response with a :ref:`Profile list <sec-api-slicing-datamodel-profilelist>`
    as the body upon successful completion.
 
+   Requires the ``SLICE`` permission.
+
    **Example**
 
    .. sourcecode:: http
 
-      GET /api/slicing/cura/profiles HTTP/1.1
+      GET /api/slicing/curalegacy/profiles HTTP/1.1
       Host: example.com
       X-Api-Key: abcdef...
 
@@ -95,13 +99,13 @@ List Slicing Profiles of a Specific Slicer
           "key": "high_quality",
           "displayName": "High Quality",
           "default": false,
-          "resource": "http://example.com/api/slicing/cura/profiles/high_quality"
+          "resource": "http://example.com/api/slicing/curalegacy/profiles/high_quality"
         },
         "medium_quality": {
           "key": "medium_quality",
           "displayName": "Medium Quality",
           "default": true,
-          "resource": "http://example.com/api/slicing/cura/profiles/medium_quality"
+          "resource": "http://example.com/api/slicing/curalegacy/profiles/medium_quality"
         }
       }
 
@@ -121,11 +125,13 @@ Retrieve Specific Profile
    Returns a :http:statuscode:`200` response with a :ref:`full Profile <sec-api-slicing-datamodel-profile>`
    as the body upon successful completion.
 
+   Requires the ``SLICE`` permission.
+
    **Example**
 
    .. sourcecode:: http
 
-      GET /api/slicing/cura/profiles/quick_test HTTP/1.1
+      GET /api/slicing/curalegacy/profiles/quick_test HTTP/1.1
       Host: example.com
       X-Api-Key: abcdef...
 
@@ -137,7 +143,7 @@ Retrieve Specific Profile
       {
         "displayName": "Just a test",
         "description": "This is just a test",
-        "resource": "http://example.com/api/slicing/cura/profiles/quick_test",
+        "resource": "http://example.com/api/slicing/curalegacy/profiles/quick_test",
         "data": {
           "bottom_layer_speed": 20.0,
           "bottom_thickness": 0.3,
@@ -168,20 +174,20 @@ Add Slicing Profile
    Returns a :http:statuscode:`201` and an :ref:`abridged Profile <sec-api-slicing-datamodel-profile>` in the body
    upon successful completion.
 
-   Requires admin rights.
+   Requires the ``SETTINGS`` permission.
 
    **Example**
 
    .. sourcecode:: http
 
-      PUT /api/slicing/cura/profiles/quick_test HTTP/1.1
+      PUT /api/slicing/curalegacy/profiles/quick_test HTTP/1.1
       Host: example.com
       X-Api-Key: abcdef...
       Content-Type: application/json
 
       {
         "displayName": "Just a test",
-        "description": "This is just a test to show how to create a cura profile with a different layer height and skirt count",
+        "description": "This is just a test to show how to create a curalegacy profile with a different layer height and skirt count",
         "data": {
           "layer_height": 0.2,
           "skirt_line_count": 3
@@ -197,14 +203,39 @@ Add Slicing Profile
 
       {
         "displayName": "Just a test",
-        "description": "This is just a test to show how to create a cura profile with a different layer height and skirt count",
-        "resource": "http://example.com/api/slicing/cura/profiles/quick_test"
+        "description": "This is just a test to show how to create a curalegacy profile with a different layer height and skirt count",
+        "resource": "http://example.com/api/slicing/curalegacy/profiles/quick_test"
       }
 
    :param slicer:   The identifying key of the slicer for which to add the profile
    :param key:      The identifying key of the new profile
    :statuscode 201: No error
    :statuscode 404: If the ``slicer`` was unknown to the system.
+
+.. _sec-api-slicing-patch:
+
+Update Slicing Profile
+======================
+
+.. http:patch:: /api/slicing/(string:slicer)/profiles/(string:key)
+
+   Updates the slicing profile identified by ``key`` for the slicer ``slicer``.
+
+   Expects a :ref:`profile update request <sec-api-slicing-datamodel-profileupdate>` as body.
+
+   Returns a :http:statuscode:`201` and an :ref:`abridged Profile <sec-api-slicing-datamodel-profile>` in the body
+   upon successful completion.
+
+   Requires the ``SETTINGS`` permission.
+
+   :param slicer:     The identifying key of the slicer for which to update the profile
+   :param key:        The identifying key of the profile to update
+   :json data:        New profile overrides to apply
+   :json displayName: New display name
+   :json description: New description
+   :json default:     Whether to make the profile default (true) or not (false) for the slicer
+   :statuscode 200:   No error
+   :statuscode 404:   Slicer or profile do not exist
 
 .. _sec-api-slicing-delete:
 
@@ -216,7 +247,7 @@ Delete Slicing Profile
    Delete the slicing profile identified by ``key`` for the slicer ``slicer``. If the profile doesn't exist, the
    request will succeed anyway.
 
-   Requires admin rights.
+   Requires the ``SETTINGS`` permission.
 
    :param slicer:   The identifying key of the slicer for which to delete the profile
    :param key:      The identifying key of the profile to delete
@@ -340,3 +371,32 @@ Profile
        only the keys differing from the defaults when saving/updating a profile. The keys to be found in here a slicer
        specific. Will be left out for list responses.
 
+.. _sec-api-slicing-datamodel-profileupdate:
+
+Profile Update Request
+----------------------
+
+.. list-table::
+   :widths: 15 5 10 30
+   :header-rows: 1
+
+   * - Name
+     - Multiplicity
+     - Type
+     - Description
+   * - ``data``
+     - 0..1
+     - Object
+     - The profile data
+   * - ``displayName``
+     - 0..1
+     - ``string``
+     - The new display name for the profile
+   * - ``description``
+     - 0..1
+     - ``string``
+     - The new description for the profile
+   * - ``default``
+     - 0..1
+     - ``boolean``
+     - Whether to mark the profile as default for the slicer (true) or not (false)

@@ -1,61 +1,66 @@
 # Supporters 
 
 Development of this version of OctoPrint wouldn't have been possible without
-[financial support by the community](http://octoprint.org/support-octoprint/) -
+[the financial support by the community](https://octoprint.org/support-octoprint/) -
 thanks to everyone who contributed!
 
 ## Patreon Patrons
 
-  * 3D Moniak
-  * Aleph Objects, Inc.
+  * Alex Krilov
   * Andrew Moorby
   * Arnljot Arntsen
-  * BEEVERYCREATIVE
+  * BigTreeTech
   * Boris Hussein
   * Brad Jackson
-  * Brian E. Tyler
   * Christian Petropolis
-  * COLLE+McVOY
-  * CreativeTools
+  * Christian Wolf
   * D Brian Kimmel
   * DeltaMaker 3D Printers
-  * E3D BigBox
+  * Dennis Breining
+  * Dorian Gray
+  * Eric Betts
   * Ernesto Martinez
-  * F. Kunsmann
-  * Frank Sander
-  * Gary Deen
-  * Gary N McKinney
+  * Franziska Kunsmann
+  * GadgetAngel
   * George Robles
-  * günter weber
-  * James Seigel
-  * Jason Lawrence
-  * Jeff Moe
-  * Josh Daniels
+  * Greg Holloway
+  * Hog Duske
+  * Hugh Blemings
+  * jean-claude migneault
+  * Jeff Renfer
+  * Jeremiah Avery
+  * Joshua Wills
+  * Justin Kaufman
   * Kaile Riser
   * Kale Stedman
   * Kazuhiro Ogura
+  * Kenneth Jiang
+  * Kurt Wubbels
+  * Kyle Menigoz
+  * LA 3D Printer Repair
+  * Lee Dohm
   * Makespace Madrid
-  * Marcus Ackermann
   * Mark Walker
+  * Martin Majewski
   * Michael Aumock
   * Miles Flavel
-  * mitchell hirsch
-  * Mohammed khorakiwala
-  * Noe Ruiz
+  * Mosaic Manufacturing
+  * Neil R. Goldberg
+  * Patrick Glyré
   * Patrick McGinnis
-  * Peter Schmehl
-  * PRINT3Dforum.com
+  * Prof Yuh Wen Chen
   * Randy C. Will
-  * Roger Strolz
-  * Roy Cortes
-  * Samer Najia
+  * Ranjib Dey
+  * Richard Michaud
+  * Rigid3D
+  * Robert Gusek
+  * Ronald Griehsler
+  * Sacha Telgenhof
   * Simon Hallam
   * Stefan Krister
-  * Stephane Schittly
+  * Steve Thompson
   * Sven Mueller
-  * Symbiotic Devices
-  * Thomas Hatley
-  * Timeshell.ca
   * Trent Shumay
+  * Ulrich Kempken
 
-and 1062 more wonderful people pledging on the [Patreon campaign](https://patreon.com/foosel)!
+and 1741 more wonderful people pledging on the [Patreon campaign](https://patreon.com/foosel) or via [Github Sponsors](https://github.com/users/foosel/sponsorship)!
