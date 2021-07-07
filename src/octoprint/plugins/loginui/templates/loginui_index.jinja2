@@ -16,14 +16,23 @@
 <body>
     <div class="container">
         <form class="form-signin">
-            <h2 class="form-signin-heading" data-test-id="login-title">{{ _('Please log in') }}</h2>
+            <h2 class="form-signin-heading" data-test-id="login-title">
+                {{ _('Please log in') }}
+                <img id="logo_compact" alt="Mr Beam Logo"
+                     style="float: right; height: 3rem;"
+                     src="/plugin/mrbeam/static/img/mr_x120.png">
+            </h2>
 
             <div id="login-error" class="alert alert-error" data-test-id="login-error">{{ _('Incorrect username or password.') }}</div>
             <div id="login-offline" class="alert alert-error">{{ _('Server is currently offline.') }} <a id="login-reconnect" href="javascript:void(0)">{{ _('Reconnect...') }}</a></div>
 
             <input type="text" id="login-user" data-test-id="login-username" class="input-block-level" placeholder="{{ _('Username')|edq }}" autofocus>
             <input type="password" id="login-password" data-test-id="login-password" class="input-block-level" placeholder="{{ _('Password')|edq }}">
-            <span class="pull-right"><small><a href="https://faq.octoprint.org/forgotten-password" id="login-forgotpassword" target="_blank" tabindex="-1">{{ _('Forgot password?') }}</a></small></span>
+            <span class="pull-right"><small>
+                <a href="https://mr-beam.freshdesk.com/support/solutions/articles/43000500137" id="login-forgotpassword" target="_blank" tabindex="-1">
+                {{ _('Forgot password?<br> Contact Mr Beam Support.') }}
+                </a>
+            </small></span>
             <label class="checkbox">
                 <input type="checkbox" id="login-remember" data-test-id="login-remember-me"> {{ _('Remember me') }}
             </label>

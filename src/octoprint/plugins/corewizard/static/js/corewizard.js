@@ -313,7 +313,7 @@ $(function() {
         };
     }
 
-    OCTOPRINT_VIEWMODELS.push({
+    for (var wizard in [{
         construct: CoreWizardAclViewModel,
         dependencies: ["loginStateViewModel"],
         elements: ["#wizard_plugin_corewizard_acl"]
@@ -337,5 +337,8 @@ $(function() {
         construct: CoreWizardPrinterProfileViewModel,
         dependencies: ["printerProfilesViewModel"],
         elements: ["#wizard_plugin_corewizard_printerprofile"]
-    });
+    }]) {
+        if (wizard.required)
+            OCTOPRINT_VIEWMODELS.push(wizard);
+    }
 });

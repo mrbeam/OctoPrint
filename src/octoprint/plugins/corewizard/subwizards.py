@@ -37,6 +37,7 @@ class WebcamSubwizard(object):
 		return True
 
 	def _is_webcam_wizard_required(self):
+		return False # Axel - Disabled as it collides with MrBeamPlugin
 		webcam_snapshot_url = self._settings.global_get(["webcam", "snapshot"])
 		webcam_stream_url = self._settings.global_get(["webcam", "stream"])
 		ffmpeg_path = self._settings.global_get(["webcam", "ffmpeg"])
@@ -56,7 +57,8 @@ class AclSubwizard(object):
 		return True
 
 	def _is_acl_wizard_required(self):
-		return self._user_manager.enabled and not self._user_manager.has_been_customized()
+		return False # Axel - Disabled as it collides with MrBeamPlugin
+		# return self._user_manager.enabled and not self._user_manager.has_been_customized()
 
 	def _get_acl_wizard_details(self):
 		return dict(required=self._is_acl_wizard_required())
@@ -137,6 +139,7 @@ class PrinterProfileSubwizard(object):
 		return True
 
 	def _is_printerprofile_wizard_required(self):
+		return False # Axel - Disabled as it collides with MrBeamPlugin
 		return self._printer_profile_manager.is_default_unmodified() and self._printer_profile_manager.profile_count == 1
 
 	def _get_printerprofile_wizard_details(self):
