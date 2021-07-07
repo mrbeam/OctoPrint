@@ -218,13 +218,15 @@ class PipCaller(CommandlineCaller):
 		# in a virtual environment may we proceed with the --user parameter.
 
 		ok, pip_user, pip_virtual_env, pip_install_dir = self._check_pip_setup(pip_command)
-		if not ok:
-			if pip_install_dir:
-				self._logger.error("Cannot use this pip install, can't write to the install dir and also can't use "
-				                   "--user for installing. Check your setup and the permissions on {}.".format(pip_install_dir))
-			else:
-				self._logger.error("Cannot use this pip install, something's wrong with the python environment. "
-				                   "Check the lines before.")
+		# if not ok:
+		# 	if pip_install_dir:
+		# 		self._logger.error("Cannot use this pip install, can't write to the install dir and also can't use "
+		# 		                   "--user for installing. Check your setup and the permissions on {}.".format(pip_install_dir))
+		# 	else:
+		# 		self._logger.error("Cannot use this pip install, something's wrong with the python environment. "
+		# 		                   "Check the lines before.")
+		if not ok and (not pip_sudo or not pip_install_dir):
+			self._logger.error("Cannot use pip")
 			return
 
 		self._command = pip_command
