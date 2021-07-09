@@ -1057,7 +1057,7 @@ class PluginManager(object):
 		# 2nd pass: enabling those plugins that need enabling
 		for name, plugin in added.items():
 			try:
-				if plugin.loaded and not plugin.forced_disabled and not plugin.incompatible:
+				if plugin.loaded and not plugin.forced_disabled and not plugin.incompatible and not name in self.plugin_disabled_list:
 					if plugin.blacklisted:
 						self.logger.warning("Plugin {} is blacklisted. Not enabling it.".format(plugin))
 						continue
