@@ -239,10 +239,10 @@ class SoftwareUpdatePlugin(octoprint.plugin.BlueprintPlugin,
 			"checks": {
 				"octoprint": {
 					"type": "github_release",
-					"user": "mrbeam",
+					"user": "foosel",
 					"repo": "OctoPrint",
 					"method": "pip",
-					"pip": "https://github.com/mrbeam/OctoPrint/archive/{target_version}.zip",
+					"pip": "https://github.com/foosel/OctoPrint/archive/{target_version}.zip",
 					"update_script": default_update_script,
 					"restart": "octoprint",
 					"stable_branch": dict(branch="mrbeam2-stable", name="Stable"),
