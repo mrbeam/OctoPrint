@@ -52,7 +52,8 @@ INSTALL_REQUIRES = [
 	"wrapt>=1.10.10,<1.11",
 	"futures>=3.1.1,<3.2",
 	"emoji>=0.4.5,<0.5",
-	"monotonic>=1.3,<1.4"
+	"monotonic>=1.3,<1.4",
+	"regex==2021.3.17"
 ]
 
 if sys.platform == "darwin":
