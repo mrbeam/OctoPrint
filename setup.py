@@ -53,7 +53,7 @@ INSTALL_REQUIRES = [
 	"futures>=3.1.1,<3.2",
 	"emoji>=0.4.5,<0.5",
 	"monotonic>=1.3,<1.4",
-	"regex==2021.3.17"
+	"regex<2022.1.18", # dependency of awesome-slugify, newer versions require Python 3
 ]
 
 if sys.platform == "darwin":
