@@ -320,11 +320,10 @@ class PipCaller(CommandlineCaller):
 
 	@classmethod
 	def to_sarge_command(cls, pip_command, *args):
-		pip_command = pip_command.split()
 		if isinstance(pip_command, list):
 			sarge_command = pip_command
 		else:
-			sarge_command = [pip_command]
+			sarge_command = pip_command.split()
 		return sarge_command + list(args)
 
 	def _get_pip_version(self, pip_command):
