@@ -136,12 +136,12 @@ def _get_sanitized_version(version_string):
 	    >>> _get_sanitized_version(None)
 	    >>> _get_sanitized_version("1.2.15")
 	    '1.2.15'
-	    >>> _get_sanitized_version("1.2.15-dev12")
-	    '1.2.15'
+	    >>> _get_sanitized_version("v1.2.15-dev12")
+	    '1.2.15-dev12'
 	"""
 
-	if version_string is not None and "-" in version_string:
-		version_string = version_string[:version_string.find("-")]
+	if version_string[0].lower() == "v":
+		version_string = version_string[1:]
 	return version_string
 
 
