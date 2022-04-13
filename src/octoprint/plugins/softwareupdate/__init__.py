@@ -226,19 +226,14 @@ class SoftwareUpdatePlugin(octoprint.plugin.BlueprintPlugin,
 			"checks": {
 				"octoprint": {
 					"type": "github_release",
-					"user": "foosel",
+					"user": "mrbeam",
 					"repo": "OctoPrint",
 					"method": "pip",
-					"pip": "https://github.com/foosel/OctoPrint/archive/{target_version}.zip",
+					"pip": "https://github.com/mrbeam/OctoPrint/archive/{target_version}.zip",
 					"update_script": default_update_script,
 					"restart": "octoprint",
 					"stable_branch": dict(branch="master", commitish=["master"], name="Stable"),
-					"prerelease_branches": [dict(branch="rc/maintenance",
-					                             commitish=["rc/maintenance"],             # maintenance RCs
-					                             name="Maintenance RCs"),
-					                        dict(branch="rc/devel",
-					                             commitish=["rc/maintenance", "rc/devel"], # devel & maintenance RCs
-					                             name="Devel RCs")]
+					"prerelease": False,
 				},
 			},
 			"pip_command": None,
