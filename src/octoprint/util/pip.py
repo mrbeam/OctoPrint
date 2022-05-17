@@ -15,7 +15,9 @@ import pkg_resources
 import sarge
 
 from octoprint.util import to_unicode
-from octoprint.util.platform import CLOSE_FDS
+
+# from octoprint.util.platform import CLOSE_FDS
+CLOSE_FDS = True
 
 from .commandline import CommandlineCaller, clean_ansi
 
@@ -208,6 +210,8 @@ class PipCaller(CommandlineCaller):
 
 	def _setup_pip(self):
 		pip_command, pip_sudo = self._get_pip_command()
+		if pip_sudo:
+			pip_command = "sudo {}".format(pip_command)
 		if pip_command is None:
 			return
 
@@ -316,6 +320,7 @@ class PipCaller(CommandlineCaller):
 
 	@classmethod
 	def to_sarge_command(cls, pip_command, *args):
+		pip_command = pip_command.split()
 		if isinstance(pip_command, list):
 			sarge_command = pip_command
 		else:
