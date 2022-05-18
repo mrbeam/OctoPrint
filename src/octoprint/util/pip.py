@@ -208,10 +208,16 @@ class PipCaller(CommandlineCaller):
 
 		return self.call(command, **kwargs)
 
+	def _get_sudo_command(self, command, sudo=False):
+		if sudo:
+			if isinstance(command, list):
+				command = ["sudo"] + command
+			else:
+				command = ["sudo"] + [command]
+		return command
+
 	def _setup_pip(self):
 		pip_command, pip_sudo = self._get_pip_command()
-		if pip_sudo:
-			pip_command = "sudo {}".format(pip_command)
 		if pip_command is None:
 			return
 
@@ -219,7 +225,7 @@ class PipCaller(CommandlineCaller):
 
 		self._logger.debug("Going to figure out pip's version")
 
-		pip_version, version_segment = self._get_pip_version(pip_command)
+		pip_version, version_segment = self._get_pip_version(self._get_sudo_command(pip_command, pip_sudo))
 		if pip_version is None:
 			return
 
@@ -244,9 +250,7 @@ class PipCaller(CommandlineCaller):
 		# installation directory is NOT writable by us but we also don't run
 		# in a virtual environment may we proceed with the --user parameter.
 
-		ok, pip_user, pip_virtual_env, pip_install_dir = self._check_pip_setup(
-			pip_command
-		)
+		ok, pip_user, pip_virtual_env, pip_install_dir = self._check_pip_setup(self._get_sudo_command(pip_command, pip_sudo))
 		if not ok:
 			if pip_install_dir:
 				self._logger.error(
@@ -331,7 +335,6 @@ class PipCaller(CommandlineCaller):
 		# generated? PyCharm bug. Disable "Attach to subprocess automatically when debugging"
 		# in IDE Settings or patch pydevd.py
 		# -> https://youtrack.jetbrains.com/issue/PY-18365#comment=27-1290453
-
 		pip_command_str = pip_command
 		if isinstance(pip_command_str, list):
 			pip_command_str = " ".join(pip_command_str)
