@@ -1426,6 +1426,7 @@ class PluginManager(object):
                     and plugin.looks_like_plugin
                     and not plugin.forced_disabled
                     and not plugin.incompatible
+                    and not self._is_plugin_disabled(name)
                 ):
                     if plugin.blacklisted:
                         self.logger.warning(
