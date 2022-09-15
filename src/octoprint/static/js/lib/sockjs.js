@@ -843,9 +843,9 @@ SockJS.prototype._transportTimeout = function() {
     this._transportClose(2007, 'Transport timed out');
   }
 };
-SockJS.prototype._websocketWatchdogCb = function(weboscket) {
+SockJS.prototype._websocketWatchdogCb = function(websocket) {
   console.warn("watchdog websocket timeout");
-  weboscket._close(1006, 'Server lost session');
+  websocket._close(1006, 'Server lost session');
 }
 SockJS.prototype._transportMessage = function(msg) {
   debug('_transportMessage', msg);
@@ -862,6 +862,7 @@ SockJS.prototype._transportMessage = function(msg) {
       return;
     case 'h':
       this.dispatchEvent(new Event('heartbeat'));
+      debug('heartbeat', this.transport);
       clearTimeout(this.heartbeatWatchdog);
       this.heartbeatWatchdog = setTimeout(this._websocketWatchdogCb, SockJS.WATCHDOG_WEBSOCKET_TIMEOUT, this);
       return;
