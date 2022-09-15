@@ -778,6 +778,7 @@ SockJS.CONNECTING = 0;
 SockJS.OPEN = 1;
 SockJS.CLOSING = 2;
 SockJS.CLOSED = 3;
+SockJS.WATCHDOG_WEBSOCKET_TIMEOUT = 30000; // The heartbeat appears every 25 seconds, so we have 5 seconds delay buffer
 
 SockJS.prototype._receiveInfo = function(info, rtt) {
   debug('_receiveInfo', rtt);
@@ -842,7 +843,10 @@ SockJS.prototype._transportTimeout = function() {
     this._transportClose(2007, 'Transport timed out');
   }
 };
-
+SockJS.prototype._websocketWatchdogCb = function(weboscket) {
+  console.warn("watchdog websocket timeout");
+  weboscket._close(1006, 'Server lost session');
+}
 SockJS.prototype._transportMessage = function(msg) {
   debug('_transportMessage', msg);
   var self = this
@@ -858,7 +862,8 @@ SockJS.prototype._transportMessage = function(msg) {
       return;
     case 'h':
       this.dispatchEvent(new Event('heartbeat'));
-      debug('heartbeat', this.transport);
+      clearTimeout(this.heartbeatWatchdog);
+      this.heartbeatWatchdog = setTimeout(this._websocketWatchdogCb, SockJS.WATCHDOG_WEBSOCKET_TIMEOUT, this);
       return;
   }
 
@@ -923,6 +928,7 @@ SockJS.prototype._open = function() {
     this.transport = this._transport.transportName;
     this.dispatchEvent(new Event('open'));
     debug('connected', this.transport);
+    this.heartbeatWatchdog = setTimeout(this._websocketWatchdogCb, SockJS.WATCHDOG_WEBSOCKET_TIMEOUT, this);
   } else {
     // The server might have been restarted, and lost track of our
     // connection.
