@@ -55,7 +55,7 @@
                 {{ _('An account with the following permissions is required:') }} {{ permission_names|join(", ") }}
             </p>{% endif %}
 
-            <input type="text" id="login-user" data-test-id="login-username" class="input-block-level" placeholder="{{ _('Username')|edq }}" autofocus autocapitalize="none">
+            <input type="text" id="login-user" data-test-id="login-username" class="input-block-level" placeholder="{{ _('Email Address')|edq }}" autofocus autocapitalize="none">
             <input type="password" id="login-password" data-test-id="login-password" class="input-block-level" placeholder="{{ _('Password')|edq }}">
             <span class="pull-right"><small>
                 <a href="https://mr-beam.freshdesk.com/support/solutions/articles/43000500137" id="login-forgotpassword" target="_blank" tabindex="-1">
