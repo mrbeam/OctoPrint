@@ -51,6 +51,9 @@
 			manager = manager.appendModal ?
 				manager : $(manager).modalmanager().data('modalmanager');
 
+			this.manager = manager;
+			this.$parent = this.$element.parent();
+			this._transitions = {};
 			manager.appendModal(this);
 		},
 
@@ -61,12 +64,17 @@
 		show: function () {
 			var e = $.Event('show');
 
-			if (this.isShown) return;
+			if (this.isHiding) {
+				this._showAfterHide = true;
+				return;
+			}
+			if (this._destroyed || this.isShown) return;
 
 			this.$element.trigger(e);
 
 			if (e.isDefaultPrevented()) return;
 
+			this.manager.showModal(this);
 			this.escape();
 
 			this.tab();
@@ -76,6 +84,7 @@
 
 		hide: function (e) {
 			e && e.preventDefault();
+			this._showAfterHide = false;
 
 			e = $.Event('hide');
 
@@ -84,6 +93,8 @@
 			if (!this.isShown || e.isDefaultPrevented()) return;
 
 			this.isShown = false;
+			this.isHiding = true;
+			this.cancelTransition("show");
 
 			this.escape();
 
@@ -201,20 +212,41 @@
 			}
 		},
 
-		hideWithTransition: function () {
-			var that = this
-				, timeout = setTimeout(function () {
-					that.$element.off($.support.transition.end);
-					that.hideModal();
-				}, 500);
+		// Animation events are advisory: never let a missing event own UI lifetime.
+		cancelTransition: function (name) {
+			if (this._transitions[name]) this._transitions[name]();
+		},
 
-			this.$element.one($.support.transition.end, function () {
-				clearTimeout(timeout);
-				that.hideModal();
-			});
+		waitForTransition: function ($element, name, callback) {
+			this.cancelTransition(name);
+			var that = this, finished = false, timer;
+			var event = $.support.transition && $.support.transition.end;
+			function cancel() {
+				finished = true;
+				clearTimeout(timer);
+				if (event) $element.off(event, complete);
+				delete that._transitions[name];
+			}
+			function complete(e) {
+				if (finished || (e && e.target !== $element[0])) return;
+				cancel();
+				callback();
+			}
+			this._transitions[name] = cancel;
+			if (event && $element.hasClass('fade')) {
+				$element.on(event, complete);
+				timer = setTimeout(complete, 500);
+			} else {
+				complete();
+			}
+		},
+
+		hideWithTransition: function () {
+			this.waitForTransition(this.$element, 'hide', $.proxy(this.hideModal, this));
 		},
 
 		hideModal: function () {
+			if (!this.isHiding || this._destroyed) return;
 			var prop = this.options.height ? 'height' : 'max-height';
 			var value = this.options.height || this.options.maxHeight;
 
@@ -224,13 +256,22 @@
 					.css(prop, '');
 			}
 
-			this.$element
-				.hide()
-				.trigger('hidden');
+			this.$element.hide();
+			try {
+				this.$element.trigger('hidden');
+			} finally {
+				// Also finish if an application event handler throws before the manager.
+				this.destroy(true);
+				if (this._showAfterHide && !this.$element.data('modal')) {
+					this._showAfterHide = false;
+					this.$element.modal($.extend({}, this.options, { show: false })).modal('show');
+				}
+			}
 		},
 
 		removeLoading: function () {
-			this.$loading.remove();
+			this.cancelTransition("loading");
+			if (this.$loading) this.$loading.remove();
 			this.$loading = null;
 			this.isLoading = false;
 		},
@@ -254,7 +295,7 @@
 				this.isLoading = true;
 
 				doAnimate ?
-					this.$loading.one($.support.transition.end, callback) :
+					this.waitForTransition(this.$loading, "loading", callback) :
 					callback();
 
 			} else if (this.isLoading && this.$loading) {
@@ -262,7 +303,7 @@
 
 				var that = this;
 				$.support.transition && this.$element.hasClass('fade')?
-					this.$loading.one($.support.transition.end, function () { that.removeLoading() }) :
+					this.waitForTransition(this.$loading, "loading", function () { that.removeLoading() }) :
 					that.removeLoading();
 
 			} else if (callback) {
@@ -300,28 +341,39 @@
 		},
 
 
-		destroy: function () {
-			var e = $.Event('destroy');
+		destroy: function (force) {
+			if (this._destroyed || this._destroying) return;
+			this._destroying = true;
+			var e = $.Event('destroy'), eventError;
+			try { this.$element.trigger(e); }
+			catch (error) { eventError = error; }
+			this._destroying = false;
+			// A completed hide must release its layers even if a listener fails/vetoes.
+			if (!force && (e.isDefaultPrevented() || eventError)) {
+				if (eventError) throw eventError;
+				return;
+			}
 
-			this.$element.trigger(e);
-
-			if (e.isDefaultPrevented()) return;
-
+			this._destroyed = true;
+			this.isShown = this.isHiding = false;
+			for (var name in this._transitions) this.cancelTransition(name);
+			this.removeLoading();
 			this.$element
 				.off('.modal')
 				.removeData('modal')
 				.removeClass('in')
+				.hide()
 				.attr('aria-hidden', true);
 
-			if (this.$parent !== this.$element.parent()) {
+			// Move the dialog before removing its wrapper; never discard its bindings.
+			if (this.$parent.length && $.contains(document.documentElement, this.$parent[0])) {
 				this.$element.appendTo(this.$parent);
-			} else if (!this.$parent.length) {
-				// modal is not part of the DOM so remove it.
-				this.$element.remove();
-				this.$element = null;
+			} else {
+				this.$element.detach();
 			}
-
+			this.manager.destroyModal(this);
 			this.$element.trigger('destroyed');
+			if (eventError) throw eventError;
 		}
 	};
 

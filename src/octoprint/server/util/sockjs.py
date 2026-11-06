@@ -109,6 +109,7 @@ class PrinterStateConnection(
         "*": [Permissions.STATUS],
     }
 
+    supports_plugin_messages = True
     _unauthed_backlog_max = 100
 
     def __init__(
@@ -184,6 +185,7 @@ class PrinterStateConnection(
             return "Unconnected {!r}".format(self)
 
     def on_open(self, info):
+        self.request_info = info
         self._pluginManager.register_message_receiver(self.on_plugin_message)
         self._remoteAddress = self._get_remote_address(info)
         self._logger.info("New connection from client: %s" % self._remoteAddress)
@@ -265,6 +267,21 @@ class PrinterStateConnection(
                 )
             )
             return
+
+        if not isinstance(message, dict):
+            return
+        # Allow plugins to consume their own protocol before native login.
+        # Authentication frames must never be included in log messages.
+        for name, hook in self._pluginManager.get_hooks(
+            "octoprint.server.sockjs.message"
+        ).items():
+            try:
+                if hook(self, message):
+                    return
+            except Exception:
+                self._logger.exception("Socket message hook failed: %s", name)
+                self.close()
+                return
 
         if "auth" in message:
             try:
@@ -425,6 +442,11 @@ class PrinterStateConnection(
         self._emit(
             "plugin", payload={"plugin": plugin, "data": data}, permissions=permissions
         )
+
+    def on_printer_add_logs(self, lines):
+        """Accept a terminal batch under one lock, before the current update."""
+        with self._logBacklogMutex:
+            self._logBacklog.extend(lines)
 
     def on_printer_add_log(self, data):
         with self._logBacklogMutex:

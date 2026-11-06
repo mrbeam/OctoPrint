@@ -18,5 +18,12 @@
         <serviceList>
         </serviceList>
         <presentationURL>{{ presentationUrl }}</presentationURL>
+        {% if additionalPresentationUrls %}
+        <X_additionalPresentationURLList>
+            {% for url in additionalPresentationUrls %}
+            <presentationURL>{{ url }}</presentationURL>
+            {% endfor %}
+        </X_additionalPresentationURLList>
+        {% endif %}
     </device>
 </root>

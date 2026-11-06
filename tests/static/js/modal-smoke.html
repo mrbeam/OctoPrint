@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Modal lifecycle regression</title>
+<style>
+body{font:16px system-ui;margin:32px;background:#f6f7f9;color:#16232e}.modal-scrollable{position:fixed;inset:0;overflow:auto}.modal-backdrop{position:fixed;inset:0;background:#000;z-index:1040;opacity:.5}.modal{position:fixed;left:30%;top:25%;width:40%;padding:24px;background:white;z-index:1050}.hide{display:none}.fade{opacity:0}.fade.in{opacity:1}button{padding:10px 16px}li{margin:10px 0}.pass{color:#126934}.fail{color:#ac2020}
+</style>
+<h1>Modal lifecycle regression</h1>
+<p>Isolated fixture: no device connection. CSS transitions are deliberately absent.</p>
+<button id="probe">Test underlying UI</button><span id="clicks">0 clicks</span>
+<ol id="results"></ol>
+<div id="home"><div id="dialog" class="modal hide fade"><h2>Test cooling dialog</h2><button>Test control</button></div></div>
+<script src="../../../src/octoprint/static/js/lib/jquery/jquery.js"></script>
+<script src="../../../src/octoprint/static/js/lib/bootstrap/bootstrap-modal.js"></script>
+<script src="../../../src/octoprint/static/js/lib/bootstrap/bootstrap-modalmanager.js"></script>
+<script>
+(async function () {
+    const $ = jQuery, d = $('#dialog'), results = $('#results');
+    $.support.transition = {end:'transitionend'};
+    let clicks = 0;
+    $('#probe').on('click', () => $('#clicks').text(++clicks + ' clicks'));
+    const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+    function check(label, pass) {
+        $('<li>').text((pass ? 'PASS: ' : 'FAIL: ') + label).addClass(pass ? 'pass' : 'fail').appendTo(results);
+        if (!pass) throw new Error(label);
+    }
+    function clean() {return !$('.modal-scrollable,.modal-backdrop').length && !$('body').hasClass('modal-open');}
+    try {
+        d.modal('show'); d.modal('hide'); await wait(650);
+        check('Missing transition events still release every layer', clean());
+        d.modal('show'); d.modal('hide'); d.modal('show'); await wait(650);
+        check('Rapid reopening keeps exactly one active pair', $('.modal-scrollable').length === 1 && $('.modal-backdrop').length === 1 && d.data('modal').isShown);
+        d.modal('hide'); await wait(650);
+        check('Reopened dialog closes cleanly', clean());
+        for (let i=0; i<200; i++) {
+            d.modal({backdrop:'static',keyboard:false}); d.modal('show'); d.modal('hide'); d.trigger('transitionend');
+        }
+        check('200 repeated cooling cycles leave no layers', clean());
+        for (let i=0; i<3; i++) {
+            const c=$('<div class="modal-scrollable" style="z-index:1060"></div>').appendTo('body');
+            $('<div class="modal-backdrop fade" style="z-index:1050"></div>').appendTo('body');
+            if(i===2)d.appendTo(c);
+        }
+        await wait(1100);
+        check('Three orphan pairs are recovered; hidden dialog preserved', clean() && $('#dialog').length === 1);
+        const b=document.getElementById('probe').getBoundingClientRect();
+        check('Underlying button receives hit testing', document.elementFromPoint(b.x+b.width/2,b.y+b.height/2).id === 'probe');
+        document.title='PASS — Modal lifecycle regression';
+    } catch(error) {document.title='FAIL — Modal lifecycle regression'; console.error(error);}
+})();
+</script>

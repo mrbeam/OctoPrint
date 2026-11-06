@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "scripts": {"test:modals": "node --test js/test-modal-lifecycle.cjs"},
+  "devDependencies": {"jsdom": "26.1.0"}
+}

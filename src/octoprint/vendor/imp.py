@@ -24,7 +24,7 @@ except ImportError:
     create_dynamic = None
 
 # noinspection PyCompatibility,PyProtectedMember
-from importlib._bootstrap import _ERR_MSG, _exec, _load, _builtin_from_name
+from importlib._bootstrap import _exec, _load, _builtin_from_name
 
 # noinspection PyCompatibility,PyProtectedMember
 from importlib._bootstrap_external import SourcelessFileLoader
@@ -285,7 +285,7 @@ def find_module(name, path=None):
             continue
         break  # Break out of outer loop when breaking out of inner loop.
     else:
-        raise ImportError(_ERR_MSG.format(name), name=name)
+        raise ImportError(f"No module named {name!r}", name=name)
 
     encoding = None
     if 'b' not in mode:

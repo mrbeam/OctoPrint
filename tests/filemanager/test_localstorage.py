@@ -252,6 +252,22 @@ class LocalStorageTest(unittest.TestCase):
         self.assertIsNotNone(copied_metadata)
         self.assertDictEqual(before_stl_metadata, copied_metadata)
 
+    def test_move_file_without_metadata_has_no_analysis(self):
+        # Files copied directly into uploads may not have a metadata entry.
+        self._add_folder("test")
+        with open(os.path.join(self.basefolder, "external.gco"), "w") as f:
+            f.write("G21\nG90\nM5\n")
+        self.assertIsNone(self.storage.get_metadata("external.gco"))
+        moved = self.storage.move_file("external.gco", "test/external.gco")
+        self.assertTrue(os.path.isfile(os.path.join(self.basefolder, moved)))
+        self.assertFalse(self.storage.has_analysis(moved))
+
+    @data((None, False), ({}, False), ({"analysis": {}}, True))
+    @unpack
+    def test_has_analysis_handles_missing_metadata(self, metadata, expected):
+        with mock.patch.object(self.storage, "get_metadata", return_value=metadata):
+            self.assertEqual(self.storage.has_analysis("example.gco"), expected)
+
     def test_copy_file_same_name(self):
         self._add_file("bp_case.stl", FILE_BP_CASE_STL)
         try:

@@ -131,6 +131,7 @@ class DiscoveryPlugin(
                 serialNumber=self._settings.get(["model", "serial"]),
                 uuid=self.get_uuid(),
                 presentationUrl=flask.url_for("index", _external=True),
+                additionalPresentationUrls=self._get_additional_presentation_urls(),
             )
         )
         response.headers["Content-Type"] = "application/xml"
@@ -505,6 +506,18 @@ class DiscoveryPlugin(
             return []
 
     ##~~ internals
+
+    def _get_additional_presentation_urls(self):
+        scheme = "https" if self._settings.get(["useSsl"]) else "http"
+        path = self._create_http_txt_record_dict().get("path", "/")
+        port = self.port
+        if not port:
+            return []
+
+        result = []
+        for addr in self.get_interface_addresses():
+            result.append(f"{scheme}://{addr}:{port}{path}")
+        return result
 
     # Zeroconf
 

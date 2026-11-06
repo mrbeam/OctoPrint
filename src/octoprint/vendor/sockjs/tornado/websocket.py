@@ -24,6 +24,17 @@ class SockJSWebSocketHandler(websocket.WebSocketHandler):
         if same_domain:
             return True
 
+        # Plugins can grant narrowly scoped transports without enabling global CORS.
+        import octoprint.plugin
+        for hook in octoprint.plugin.plugin_manager().get_hooks(
+            "octoprint.server.sockjs.origin"
+        ).values():
+            try:
+                if hook(origin, self.request) is True:
+                    return True
+            except Exception:
+                return False
+
         # this is cross-origin connection - check using SockJS server settings
         allow_origin = self.server.settings.get("websocket_allow_origin", "*")
         if allow_origin == "":

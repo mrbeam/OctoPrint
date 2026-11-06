@@ -50,6 +50,7 @@ jobs:
   test-unit:
     name: 🧪 Unit tests
     strategy:
+      fail-fast: false
       matrix:
         python: ["3.10", "3.13"]
     runs-on: ubuntu-latest
@@ -135,13 +136,49 @@ jobs:
           mkdir e2econfig
           cp -r .github/fixtures/with_acl/* e2econfig
 
+      - name: 🚀 Start test server and wait for readiness
+        shell: bash
+        run: |
+          nohup octoprint -b "$GITHUB_WORKSPACE/e2econfig" serve --host 127.0.0.1 --port 5000 > "$RUNNER_TEMP/octoprint-e2e.log" 2>&1 &
+          server_pid=$!
+          echo "$server_pid" > "$RUNNER_TEMP/octoprint-e2e.pid"
+          for attempt in $(seq 1 60); do
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo "OctoPrint exited before becoming ready"
+              cat "$RUNNER_TEMP/octoprint-e2e.log"
+              exit 1
+            fi
+            if curl --fail --silent --max-time 2 http://127.0.0.1:5000/online.txt > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "OctoPrint did not become ready within the retry limit"
+          cat "$RUNNER_TEMP/octoprint-e2e.log"
+          exit 1
+
       - name: 🚀 Run Cypress
         uses: cypress-io/github-action@v6
         with:
           working-directory: tests/cypress
           browser: chrome
-          start: "octoprint -b ${{ github.workspace }}/e2econfig serve --host 127.0.0.1 --port 5000"
-          wait-on: "http://127.0.0.1:5000/online.txt"
+
+      - name: Stop test server
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/octoprint-e2e.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/octoprint-e2e.pid")" 2>/dev/null || true
+          fi
+
+      - name: ⬆ Upload server logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: octoprint-e2e-logs
+          path: |
+            ${{ runner.temp }}/octoprint-e2e.log
+            e2econfig/logs/
 
       - name: ⬆ Upload screenshots
         uses: actions/upload-artifact@v4
